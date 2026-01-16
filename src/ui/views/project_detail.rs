@@ -129,20 +129,6 @@ fn render_current_config(
                 let section_matching_envs = project.find_section_matching_envs(section_name);
                 let is_custom = section_matching_envs.is_empty();
 
-                // Build env display spans
-                let env_spans: Vec<Span> = if is_custom {
-                    vec![Span::styled("custom", style_warning())]
-                } else {
-                    let mut spans = Vec::new();
-                    for (i, env) in section_matching_envs.iter().enumerate() {
-                        if i > 0 {
-                            spans.push(Span::styled("=", style_env_separator()));
-                        }
-                        spans.push(Span::styled(env.display_name().to_string(), style_success()));
-                    }
-                    spans
-                };
-
                 // Section header row - selectable
                 let prefix = if is_selected { "> " } else { "  " };
                 let row_style = if is_selected {
@@ -160,15 +146,46 @@ fn render_current_config(
                     " ".to_string()
                 };
 
-                let mut section_line_spans = vec![
-                    Span::raw(prefix),
-                    Span::styled(section_display, style_section_header()),
-                    Span::raw(padding_after_section),
-                ];
-                section_line_spans.extend(env_spans);
+                // Build multiple lines for environments (each env on separate line)
+                let mut lines: Vec<Line> = Vec::new();
 
-                let section_line = Line::from(section_line_spans);
-                items.push(ListItem::new(section_line).style(row_style));
+                if is_custom {
+                    // Custom section - show 'custom' on first line
+                    let first_line = Line::from(vec![
+                        Span::raw(prefix),
+                        Span::styled(section_display.clone(), style_section_header()),
+                        Span::raw(padding_after_section.clone()),
+                        Span::styled("custom", style_warning()),
+                    ]);
+                    lines.push(first_line);
+                } else {
+                    // Multiple environments - each on its own line
+                    for (i, env) in section_matching_envs.iter().enumerate() {
+                        if i == 0 {
+                            // First line: section + first env
+                            let first_line = Line::from(vec![
+                                Span::raw(prefix),
+                                Span::styled(section_display.clone(), style_section_header()),
+                                Span::raw(padding_after_section.clone()),
+                                Span::styled(env.display_name().to_string(), style_success()),
+                            ]);
+                            lines.push(first_line);
+                        } else {
+                            // Continuation lines: padding + "=env"
+                            let continuation_prefix = if is_selected { "> " } else { "  " };
+                            let section_padding = " ".repeat(section_width + padding_after_section.len());
+                            let continuation_line = Line::from(vec![
+                                Span::raw(continuation_prefix),
+                                Span::raw(section_padding),
+                                Span::styled(" =", style_env_separator()),
+                                Span::styled(env.display_name().to_string(), style_success()),
+                            ]);
+                            lines.push(continuation_line);
+                        }
+                    }
+                }
+
+                items.push(ListItem::new(lines).style(row_style));
             }
             DisplayItem::Key(key) => {
                 // Get current value and check if key has a section
@@ -195,23 +212,6 @@ fn render_current_config(
                 let matching_envs = project.find_all_matching_envs(key);
                 let is_custom = matching_envs.is_empty();
 
-                // Build env display spans with colored '=' separators
-                let env_spans: Vec<Span> = if has_duplicates {
-                    // Winner key - show '*' marker in red
-                    vec![Span::styled("*", style_duplicated())]
-                } else if is_custom {
-                    vec![Span::styled("custom", style_warning())]
-                } else {
-                    let mut spans = Vec::new();
-                    for (i, env) in matching_envs.iter().enumerate() {
-                        if i > 0 {
-                            spans.push(Span::styled("=", style_env_separator()));
-                        }
-                        spans.push(Span::styled(env.display_name().to_string(), style_success()));
-                    }
-                    spans
-                };
-
                 // Truncate value for display
                 let truncated_value = if value.len() > 40 {
                     format!("{}...", &value[..37])
@@ -226,15 +226,6 @@ fn render_current_config(
                     style_normal()
                 };
 
-                // Calculate env display width for padding
-                let env_display_width: usize = env_spans.iter().map(|s| s.content.len()).sum();
-                let padding = if env_display_width < 15 {
-                    " ".repeat(15 - env_display_width)
-                } else {
-                    String::new()
-                };
-
-                // Build line with multiple env spans
                 // Indent keys that belong to a section by 2 spaces
                 let (indent, key_width) = if has_section {
                     ("  ", 21) // 2 space indent, shorter key width
@@ -242,18 +233,67 @@ fn render_current_config(
                     ("", 23) // No indent, full key width
                 };
 
-                let mut line_spans = vec![
-                    Span::raw(prefix),
-                    Span::raw(indent),
-                    Span::styled(format!("{:<width$}", key, width = key_width), style_key()),
-                ];
-                line_spans.extend(env_spans);
-                line_spans.push(Span::raw(padding));
-                line_spans.push(Span::styled(truncated_value, style_value()));
+                // Build multiple lines for environments (each env on separate line)
+                let mut lines: Vec<Line> = Vec::new();
 
-                let line = Line::from(line_spans);
+                if has_duplicates {
+                    // Winner key - show '*' marker in red on first line
+                    let first_line = Line::from(vec![
+                        Span::raw(prefix),
+                        Span::raw(indent),
+                        Span::styled(format!("{:<width$}", key, width = key_width), style_key()),
+                        Span::styled("*", style_duplicated()),
+                        Span::raw(" ".repeat(14)), // padding to align value
+                        Span::styled(truncated_value.clone(), style_value()),
+                    ]);
+                    lines.push(first_line);
+                } else if is_custom {
+                    // Custom value - show 'custom' on first line
+                    let first_line = Line::from(vec![
+                        Span::raw(prefix),
+                        Span::raw(indent),
+                        Span::styled(format!("{:<width$}", key, width = key_width), style_key()),
+                        Span::styled("custom", style_warning()),
+                        Span::raw(" ".repeat(9)), // padding to align value
+                        Span::styled(truncated_value.clone(), style_value()),
+                    ]);
+                    lines.push(first_line);
+                } else {
+                    // Multiple environments - each on its own line
+                    for (i, env) in matching_envs.iter().enumerate() {
+                        if i == 0 {
+                            // First line: key + first env + value
+                            let env_name = env.display_name().to_string();
+                            let env_padding = if env_name.len() < 15 {
+                                " ".repeat(15 - env_name.len())
+                            } else {
+                                String::new()
+                            };
+                            let first_line = Line::from(vec![
+                                Span::raw(prefix),
+                                Span::raw(indent),
+                                Span::styled(format!("{:<width$}", key, width = key_width), style_key()),
+                                Span::styled(env_name, style_success()),
+                                Span::raw(env_padding),
+                                Span::styled(truncated_value.clone(), style_value()),
+                            ]);
+                            lines.push(first_line);
+                        } else {
+                            // Continuation lines: padding + " =env"
+                            let continuation_prefix = if is_selected { "> " } else { "  " };
+                            let key_padding = " ".repeat(indent.len() + key_width);
+                            let continuation_line = Line::from(vec![
+                                Span::raw(continuation_prefix),
+                                Span::raw(key_padding),
+                                Span::styled(" =", style_env_separator()),
+                                Span::styled(env.display_name().to_string(), style_success()),
+                            ]);
+                            lines.push(continuation_line);
+                        }
+                    }
+                }
 
-                items.push(ListItem::new(line).style(row_style));
+                items.push(ListItem::new(lines).style(row_style));
             }
             DisplayItem::DuplicatedKey(key, value, line_num) => {
                 // Duplicated key - shows earlier occurrence that was overwritten
