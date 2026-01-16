@@ -5,55 +5,31 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, Section};
+use crate::app::AppState;
 use crate::models::{DisplayItem, EnvironmentType};
-use crate::ui::pagination::{calculate_visible_range, calculate_visible_range_multiline, scroll_status};
+use crate::ui::pagination::{calculate_visible_range_multiline, scroll_status};
 use crate::ui::styles::*;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
-    // Split area for current config and missing sections
-    let sections = state.get_sections();
-    let has_missing = sections.len() > 1;
-
-    let chunks = if has_missing {
-        Layout::vertical([
-            Constraint::Percentage(60), // Current config
-            Constraint::Percentage(40), // Missing keys
-        ])
-        .split(area)
-    } else {
-        Layout::vertical([Constraint::Percentage(100)]).split(area)
-    };
-
     // Clone project data needed for rendering to avoid borrow conflicts
     let project = match state.current_project() {
         Some(p) => p.clone(),
         None => return,
     };
 
-    // Render current config section
-    render_current_config(frame, chunks[0], state, &project);
-
-    // Render missing sections if any
-    if has_missing {
-        render_missing_sections(frame, chunks[1], state, &project, &sections);
-    }
+    // Render unified list (full height)
+    render_unified_list(frame, area, state, &project);
 }
 
-fn render_current_config(
+fn render_unified_list(
     frame: &mut Frame,
     area: Rect,
     state: &mut AppState,
     project: &crate::models::Project,
 ) {
-    let is_active = state.selected_section == Section::CurrentConfig;
-    let border_style = if is_active {
-        style_border_focused()
-    } else {
-        style_border()
-    };
+    let border_style = style_border_focused();
 
-    let display_items = project.display_items();
+    let display_items = project.unified_display_items();
     let total_items = display_items.len();
 
     // Pre-calculate the line height for each display item
@@ -86,6 +62,7 @@ fn render_current_config(
                 }
             }
             DisplayItem::DuplicatedKey(_, _, _) => 1, // always single line
+            DisplayItem::InactiveKey(_) => 1,         // always single line
         })
         .collect();
 
@@ -93,15 +70,11 @@ fn render_current_config(
 
     // Calculate scroll status for title
     let visible_height = area.height.saturating_sub(6) as usize; // Account for borders, header line, and hint
-    let scroll_info = if is_active {
-        scroll_status(state.config_scroll, visible_height, total_lines)
-    } else {
-        String::new()
-    };
+    let scroll_info = scroll_status(state.config_scroll, visible_height, total_lines);
 
     let block = Block::default()
         .title(Span::styled(
-            format!(" Current Configuration (.env){} ", scroll_info),
+            format!(" Configuration{} ", scroll_info),
             style_header(),
         ))
         .borders(Borders::ALL)
@@ -113,7 +86,7 @@ fn render_current_config(
 
     if display_items.is_empty() {
         let empty_msg = Paragraph::new(Span::styled(
-            "No environment variables in .env",
+            "No environment variables found",
             style_muted(),
         ));
         frame.render_widget(empty_msg, inner);
@@ -138,7 +111,7 @@ fn render_current_config(
 
     // Calculate visible range for pagination using multiline-aware function
     let list_visible_height = chunks[1].height as usize;
-    let (start, end) = if is_active && !item_heights.is_empty() {
+    let (start, end) = if !item_heights.is_empty() {
         let selected = state.selected_key_index.min(total_items.saturating_sub(1));
         calculate_visible_range_multiline(
             &item_heights,
@@ -147,24 +120,14 @@ fn render_current_config(
             list_visible_height,
         )
     } else {
-        // For inactive view, show items that fit from the beginning
-        let mut lines_used = 0;
-        let mut end_idx = 0;
-        for &h in &item_heights {
-            if lines_used + h > list_visible_height {
-                break;
-            }
-            lines_used += h;
-            end_idx += 1;
-        }
-        (0, end_idx.max(1).min(total_items))
+        (0, 0)
     };
 
     // Create list items only for visible range
     let mut items: Vec<ListItem> = Vec::new();
 
     for (idx, item) in display_items.iter().enumerate().skip(start).take(end - start) {
-        let is_selected = is_active && idx == state.selected_key_index;
+        let is_selected = idx == state.selected_key_index;
 
         match item {
             DisplayItem::Section(section_name) => {
@@ -385,154 +348,55 @@ fn render_current_config(
                 let line = Line::from(line_spans);
                 items.push(ListItem::new(line).style(row_style));
             }
+            DisplayItem::InactiveKey(key) => {
+                // Inactive key - exists in other envs but not in .env
+                // Show in darker gray with "disabled" as the environment status
+                let prefix = if is_selected { "> " } else { "  " };
+                let row_style = if is_selected {
+                    style_selected()
+                } else {
+                    style_normal()
+                };
+
+                // Get list of envs that have this key
+                let envs_with_key = project.envs_with_key(key);
+                let env_list: String = if envs_with_key.is_empty() {
+                    String::new()
+                } else {
+                    let names: Vec<String> = envs_with_key
+                        .iter()
+                        .map(|e| e.display_name().to_string())
+                        .collect();
+                    format!("[{}]", names.join(", "))
+                };
+
+                let line_spans = vec![
+                    Span::raw(prefix),
+                    Span::styled(format!("{:<23}", key), style_muted()),
+                    Span::styled("disabled", style_muted()),
+                    Span::raw("       "), // padding to align env list
+                    Span::styled(env_list, style_muted()),
+                ];
+
+                let line = Line::from(line_spans);
+                items.push(ListItem::new(line).style(row_style));
+            }
         }
     }
 
     let list = List::new(items);
     frame.render_widget(list, chunks[1]);
 
-    // Render hint at bottom
+    // Render hint at bottom (removed Tab since we have unified list)
     let hint = Line::from(vec![
-        Span::styled("Tab", style_header()),
-        Span::raw(" select env  "),
         Span::styled("Enter", style_header()),
         Span::raw(" edit  "),
         Span::styled("h/l", style_header()),
         Span::raw(" cycle env  "),
         Span::styled("S", style_header()),
-        Span::raw(" bulk switch"),
+        Span::raw(" bulk switch  "),
+        Span::styled("a", style_header()),
+        Span::raw(" add key"),
     ]);
     frame.render_widget(Paragraph::new(hint), chunks[2]);
-}
-
-fn render_missing_sections(
-    frame: &mut Frame,
-    area: Rect,
-    state: &mut AppState,
-    project: &crate::models::Project,
-    sections: &[Section],
-) {
-    let missing_sections: Vec<_> = sections
-        .iter()
-        .filter_map(|s| {
-            if let Section::MissingFrom(env) = s {
-                Some(env)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if missing_sections.is_empty() {
-        return;
-    }
-
-    // Calculate space for each missing section
-    let constraint = Constraint::Ratio(1, missing_sections.len() as u32);
-    let constraints: Vec<_> = missing_sections.iter().map(|_| constraint).collect();
-    let chunks = Layout::horizontal(constraints).split(area);
-
-    for (idx, env_type) in missing_sections.iter().enumerate() {
-        let section = Section::MissingFrom((*env_type).clone());
-        let is_active = state.selected_section == section;
-
-        render_missing_section(frame, chunks[idx], state, project, env_type, is_active);
-    }
-}
-
-fn render_missing_section(
-    frame: &mut Frame,
-    area: Rect,
-    state: &mut AppState,
-    project: &crate::models::Project,
-    env_type: &EnvironmentType,
-    is_active: bool,
-) {
-    let border_style = if is_active {
-        style_border_focused()
-    } else {
-        style_border()
-    };
-
-    let missing_keys = project.missing_keys_for_env(env_type);
-    let total_items = missing_keys.len();
-
-    // Calculate scroll status for title
-    let scroll_info = if is_active {
-        let current_scroll = state.get_missing_scroll(env_type);
-        scroll_status(
-            current_scroll,
-            area.height.saturating_sub(4) as usize, // Account for borders
-            total_items,
-        )
-    } else {
-        String::new()
-    };
-
-    let block = Block::default()
-        .title(Span::styled(
-            format!(" Missing from {}{} ", env_type.filename(), scroll_info),
-            if is_active { style_header() } else { style_muted() },
-        ))
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .padding(Padding::horizontal(1));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    if missing_keys.is_empty() {
-        return;
-    }
-
-    // Calculate visible range for pagination
-    let visible_height = inner.height as usize;
-    let (start, end) = if is_active {
-        let mut scroll = state.get_missing_scroll(env_type);
-        let range = calculate_visible_range(
-            total_items,
-            state.selected_key_index,
-            &mut scroll,
-            visible_height,
-        );
-        state.set_missing_scroll(env_type, scroll);
-        range
-    } else {
-        (0, visible_height.min(total_items))
-    };
-
-    let items: Vec<ListItem> = missing_keys
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(end - start)
-        .map(|(idx, key)| {
-            let is_selected = is_active && idx == state.selected_key_index;
-
-            let value = project.get_value(key, env_type).unwrap_or("");
-            let truncated = if value.len() > 25 {
-                format!("{}...", &value[..22])
-            } else {
-                value.to_string()
-            };
-
-            let prefix = if is_selected { "> " } else { "  " };
-            let style = if is_selected {
-                style_selected()
-            } else {
-                style_normal()
-            };
-
-            let line = Line::from(vec![
-                Span::raw(prefix),
-                Span::styled(format!("{}: ", key), style_key()),
-                Span::styled(truncated, style_muted()),
-            ]);
-
-            ListItem::new(line).style(style)
-        })
-        .collect();
-
-    let list = List::new(items);
-    frame.render_widget(list, inner);
 }

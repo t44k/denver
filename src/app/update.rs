@@ -293,24 +293,23 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
         }
 
         Action::AddKeyFromMissing => {
-            // Add a missing key to .env with its value from the source env
-            if let Section::MissingFrom(ref env_type) = state.selected_section.clone() {
+            // Enable an inactive key by adding it to .env with value from first available env
+            if state.is_current_item_inactive() {
                 if let Some(key) = state.current_key() {
-                    let env_type_clone = env_type.clone();
                     let key_clone = key.clone();
 
-                    if let Some(project) = state.current_project_mut() {
-                        project.set_value_from_env(&key_clone, &env_type_clone);
-                        project.rebuild_keys_cache();
+                    // Find first env that has this key
+                    let first_env = state.current_project()
+                        .and_then(|p| p.envs_with_key(&key_clone).first().cloned().cloned());
 
-                        // Check if section should change
-                        let should_switch = project.missing_keys_for_env(&env_type_clone).is_empty();
-                        if should_switch {
-                            state.selected_section = Section::CurrentConfig;
+                    if let Some(env_type) = first_env {
+                        let env_type_clone = env_type.clone();
+                        if let Some(project) = state.current_project_mut() {
+                            project.set_value_from_env(&key_clone, &env_type_clone);
+                            project.rebuild_keys_cache();
                         }
-                        state.selected_key_index = 0;
+                        state.show_message(format!("Enabled {} from {}", key_clone, env_type_clone), MessageLevel::Success);
                     }
-                    state.show_message(format!("Added {} from {}", key_clone, env_type_clone), MessageLevel::Success);
                 }
             }
             None
@@ -323,6 +322,25 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                     message: format!("Delete '{}' from all environments?", key),
                     on_confirm: DialogAction::DeleteKey { key },
                 });
+            }
+            None
+        }
+
+        Action::DisableKey { key } => {
+            // Remove key from .env (target) but keep in other envs
+            if let Some(project) = state.current_project_mut() {
+                project.delete_key_from_env(&key, &EnvironmentType::Default);
+                state.show_message(format!("Disabled {} (removed from .env)", key), MessageLevel::Info);
+            }
+            None
+        }
+
+        Action::EnableKey { key, from_env } => {
+            // Add inactive key to .env from a specific environment
+            if let Some(project) = state.current_project_mut() {
+                project.set_value_from_env(&key, &from_env);
+                project.rebuild_keys_cache();
+                state.show_message(format!("Enabled {} from {}", key, from_env), MessageLevel::Success);
             }
             None
         }
@@ -684,55 +702,108 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
 }
 
 /// Cycle through environment values for the current key
+/// Options cycle: env1 -> env2 -> ... -> envN -> disabled -> env1 -> ...
+/// For inactive keys: disabled -> env1 -> ...
 fn cycle_env_value(state: &mut AppState, forward: bool) {
-    // Only works in CurrentConfig section
-    if state.selected_section != Section::CurrentConfig {
-        return;
-    }
-
     let Some(key) = state.current_key() else { return };
 
+    // Check if key is currently inactive (disabled)
+    let is_inactive = state.is_current_item_inactive();
+
     // Gather info from immutable borrow
-    let (_env_types, _current_match, value_to_set, new_env_name) = {
+    let action = {
         let Some(project) = state.current_project() else { return };
 
-        let env_types: Vec<_> = project.named_env_types().into_iter().cloned().collect();
+        // Get envs that have this key (for inactive keys, get all envs with the key)
+        let env_types: Vec<_> = if is_inactive {
+            project.envs_with_key(&key).into_iter().cloned().collect()
+        } else {
+            project.named_env_types().into_iter().cloned().collect()
+        };
+
         if env_types.is_empty() {
             return;
         }
 
-        let current_match = project.find_matching_env(&key);
-        let current_idx = current_match
-            .as_ref()
-            .and_then(|m| env_types.iter().position(|e| e == m));
-
-        let next_idx = if forward {
-            match current_idx {
-                Some(idx) => (idx + 1) % env_types.len(),
-                None => 0,
-            }
+        if is_inactive {
+            // Key is disabled - cycling enables it from an env
+            // Forward: enable from first env, Backward: enable from last env
+            let env_idx = if forward { 0 } else { env_types.len() - 1 };
+            let env_type = env_types[env_idx].clone();
+            CycleAction::Enable { key: key.clone(), from_env: env_type }
         } else {
-            match current_idx {
-                Some(idx) if idx > 0 => idx - 1,
-                Some(_) => env_types.len() - 1,
-                None => env_types.len() - 1,
+            // Key is active - find current match and cycle
+            let current_match = project.find_matching_env(&key);
+            let current_idx = current_match
+                .as_ref()
+                .and_then(|m| env_types.iter().position(|e| e == m));
+
+            // Extended cycle includes "disabled" as the last option
+            // Options: 0..len-1 = envs, len = disabled
+            let total_options = env_types.len() + 1; // +1 for disabled
+
+            let current_pos = match current_idx {
+                Some(idx) => idx,
+                None => total_options, // custom value - treat as after disabled
+            };
+
+            let next_pos = if forward {
+                (current_pos + 1) % total_options
+            } else {
+                if current_pos == 0 {
+                    total_options - 1 // wrap to disabled
+                } else {
+                    current_pos - 1
+                }
+            };
+
+            if next_pos < env_types.len() {
+                // Set value from env
+                let new_env = &env_types[next_pos];
+                let value = project.get_value(&key, new_env).map(String::from);
+                CycleAction::SetValue {
+                    key: key.clone(),
+                    value,
+                    env_name: new_env.to_string(),
+                }
+            } else {
+                // Disable (remove from .env)
+                CycleAction::Disable { key: key.clone() }
             }
-        };
-
-        let new_env = &env_types[next_idx];
-        let value = project.get_value(&key, new_env).map(String::from);
-        let env_name = new_env.to_string();
-
-        (env_types, current_match, value, env_name)
+        }
     };
 
-    // Now apply with mutable borrow
-    if let Some(value) = value_to_set {
-        if let Some(project) = state.current_project_mut() {
-            project.set_default_value(key.clone(), value);
-            state.show_message(format!("Set {} to {} value", key, new_env_name), MessageLevel::Info);
+    // Apply the action with mutable borrow
+    match action {
+        CycleAction::SetValue { key, value, env_name } => {
+            if let Some(value) = value {
+                if let Some(project) = state.current_project_mut() {
+                    project.set_default_value(key.clone(), value);
+                    state.show_message(format!("Set {} to {} value", key, env_name), MessageLevel::Info);
+                }
+            }
+        }
+        CycleAction::Disable { key } => {
+            if let Some(project) = state.current_project_mut() {
+                project.delete_key_from_env(&key, &EnvironmentType::Default);
+                state.show_message(format!("Disabled {}", key), MessageLevel::Info);
+            }
+        }
+        CycleAction::Enable { key, from_env } => {
+            if let Some(project) = state.current_project_mut() {
+                project.set_value_from_env(&key, &from_env);
+                project.rebuild_keys_cache();
+                state.show_message(format!("Enabled {} from {}", key, from_env), MessageLevel::Success);
+            }
         }
     }
+}
+
+/// Helper enum for cycle_env_value
+enum CycleAction {
+    SetValue { key: String, value: Option<String>, env_name: String },
+    Disable { key: String },
+    Enable { key: String, from_env: EnvironmentType },
 }
 
 /// Get the value for the selected slot in key editor

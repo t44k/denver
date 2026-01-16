@@ -53,18 +53,24 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
 
     // Render target slot first (index 0)
     let is_target_selected = state.selected_key_index == 0;
-    let target_value = project.get_value(key, &EnvironmentType::Default).unwrap_or("");
-    let target_label = format!("{} (target)", target_name);
+    let target_value = project.get_value(key, &EnvironmentType::Default);
+    let is_inactive = target_value.is_none();
+    let target_label = if is_inactive {
+        format!("{} (disabled)", target_name)
+    } else {
+        format!("{} (target)", target_name)
+    };
 
     render_env_slot(
         frame,
         chunks[0],
         &target_label,
-        target_value,
+        target_value.unwrap_or("(not set)"),
         is_target_selected,
         state.input_mode == InputMode::Editing && is_target_selected,
         &state.input_buffer,
         true, // is_target
+        is_inactive,
     );
 
     // Render each named env slot (indices 1..n)
@@ -82,6 +88,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
             state.input_mode == InputMode::Editing && is_selected,
             &state.input_buffer,
             false, // not target
+            false, // not inactive (for named envs)
         );
     }
 }
@@ -95,8 +102,16 @@ fn render_env_slot(
     is_editing: bool,
     input_buffer: &str,
     is_target: bool,
+    is_inactive: bool,
 ) {
-    let border_style = if is_target {
+    let border_style = if is_inactive && is_target {
+        // Inactive target: show in muted style
+        if is_selected {
+            style_warning()
+        } else {
+            style_muted()
+        }
+    } else if is_target {
         if is_selected {
             style_target_selected()
         } else {
@@ -108,7 +123,13 @@ fn render_env_slot(
         style_border()
     };
 
-    let title_style = if is_target {
+    let title_style = if is_inactive && is_target {
+        if is_selected {
+            style_warning()
+        } else {
+            style_muted()
+        }
+    } else if is_target {
         if is_selected {
             style_target_selected()
         } else {
@@ -128,6 +149,8 @@ fn render_env_slot(
 
     let value_style = if is_editing {
         style_input_active()
+    } else if is_inactive && is_target && !is_editing {
+        style_muted() // Inactive value shown in muted
     } else if is_selected {
         style_value()
     } else {

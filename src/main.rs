@@ -10,7 +10,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use denver::app::{Action, AppState, InputMode, Section, View};
+use denver::app::{Action, AppState, InputMode, View};
 use denver::scanner::scan_directory;
 use denver::ui;
 
@@ -164,55 +164,37 @@ fn key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -> Op
             _ => None,
         },
 
-        View::ProjectDetail => {
-            // Different behavior based on section
-            match &state.selected_section {
-                Section::CurrentConfig => match code {
-                    // Shift+Arrow for reordering
-                    KeyCode::Up if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveUp),
-                    KeyCode::Down if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveDown),
-                    KeyCode::Right if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveIntoSection),
-                    KeyCode::Left if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveOutOfSection),
-                    // Normal navigation
-                    KeyCode::Up | KeyCode::Char('k') => Some(Action::NavigateUp),
-                    KeyCode::Down | KeyCode::Char('j') => Some(Action::NavigateDown),
-                    KeyCode::Left | KeyCode::Char('h') => Some(Action::CycleEnvBack),
-                    KeyCode::Right | KeyCode::Char('l') => Some(Action::CycleEnv),
-                    KeyCode::Tab => {
-                        // If on a section header, open section env selector
-                        // If on a key, open key env selector
-                        if let Some(section) = state.current_section_name() {
-                            Some(Action::OpenSectionEnvMenu { section })
-                        } else {
-                            Some(Action::OpenEnvMenu)
-                        }
-                    }
-                    KeyCode::Enter => Some(Action::Select), // Open key editor
-                    KeyCode::Char('a') => Some(Action::AddKey),
-                    KeyCode::Char('d') => Some(Action::DeleteKey),
-                    KeyCode::Char('S') => Some(Action::BulkSwitch),
-                    KeyCode::Char('s') => Some(Action::SaveAll),
-                    KeyCode::Esc => Some(Action::Back),
-                    KeyCode::Char('?') => Some(Action::ToggleHelp),
-                    KeyCode::Char('q') => Some(Action::Quit),
-                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Some(Action::ForceQuit),
-                    _ => None,
-                },
-                Section::MissingFrom(_) => match code {
-                    KeyCode::Up | KeyCode::Char('k') => Some(Action::NavigateUp),
-                    KeyCode::Down | KeyCode::Char('j') => Some(Action::NavigateDown),
-                    KeyCode::Tab => Some(Action::NextSection),
-                    KeyCode::BackTab => Some(Action::PrevSection),
-                    KeyCode::Enter => Some(Action::AddKeyFromMissing), // Add to .env
-                    KeyCode::Esc => Some(Action::Back),
-                    KeyCode::Char('s') => Some(Action::SaveAll),
-                    KeyCode::Char('?') => Some(Action::ToggleHelp),
-                    KeyCode::Char('q') => Some(Action::Quit),
-                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Some(Action::ForceQuit),
-                    _ => None,
-                },
+        View::ProjectDetail => match code {
+            // Shift+Arrow for reordering (only works for active keys)
+            KeyCode::Up if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveUp),
+            KeyCode::Down if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveDown),
+            KeyCode::Right if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveIntoSection),
+            KeyCode::Left if modifiers.contains(KeyModifiers::SHIFT) => Some(Action::MoveOutOfSection),
+            // Normal navigation
+            KeyCode::Up | KeyCode::Char('k') => Some(Action::NavigateUp),
+            KeyCode::Down | KeyCode::Char('j') => Some(Action::NavigateDown),
+            KeyCode::Left | KeyCode::Char('h') => Some(Action::CycleEnvBack),
+            KeyCode::Right | KeyCode::Char('l') => Some(Action::CycleEnv),
+            KeyCode::Tab => {
+                // If on a section header, open section env selector
+                // If on a key, open key env selector
+                if let Some(section) = state.current_section_name() {
+                    Some(Action::OpenSectionEnvMenu { section })
+                } else {
+                    Some(Action::OpenEnvMenu)
+                }
             }
-        }
+            KeyCode::Enter => Some(Action::Select), // Open key editor
+            KeyCode::Char('a') => Some(Action::AddKey),
+            KeyCode::Char('d') => Some(Action::DeleteKey),
+            KeyCode::Char('S') => Some(Action::BulkSwitch),
+            KeyCode::Char('s') => Some(Action::SaveAll),
+            KeyCode::Esc => Some(Action::Back),
+            KeyCode::Char('?') => Some(Action::ToggleHelp),
+            KeyCode::Char('q') => Some(Action::Quit),
+            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Some(Action::ForceQuit),
+            _ => None,
+        },
 
         View::KeyEditor => match code {
             KeyCode::Up | KeyCode::Char('k') => Some(Action::NavigateUp),

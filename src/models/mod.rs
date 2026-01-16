@@ -15,4 +15,6 @@ pub enum DisplayItem {
     Key(String),
     /// A duplicated key (earlier occurrence that was overwritten) - contains key, value, and line number
     DuplicatedKey(String, String, usize),
+    /// An inactive key (exists in other envs but not in target .env)
+    InactiveKey(String),
 }

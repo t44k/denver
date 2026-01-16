@@ -26,8 +26,10 @@ pub enum Action {
     AddKey,
     AddKeyFromMissing, // Add missing key to .env
     DeleteKey,
-    CycleEnv,      // Change to next env value
-    CycleEnvBack,  // Change to previous env value
+    DisableKey { key: String }, // Remove key from .env (keep in other envs)
+    EnableKey { key: String, from_env: EnvironmentType }, // Add inactive key to .env from an env
+    CycleEnv,      // Change to next env value (includes disabled option)
+    CycleEnvBack,  // Change to previous env value (includes disabled option)
 
     // Reordering operations
     MoveUp,           // Move item up within same level (Shift+Up)

@@ -5,7 +5,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, InputMode, MessageLevel, Section, View};
+use crate::app::{AppState, InputMode, MessageLevel, View};
 use crate::ui::styles::*;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
@@ -39,27 +39,16 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
                 ("s", "Save all"),
                 ("q", "Quit"),
             ],
-            View::ProjectDetail => {
-                match &state.selected_section {
-                    Section::CurrentConfig => vec![
-                        ("j/k", "Navigate"),
-                        ("h/l", "Cycle env"),
-                        ("Tab", "Next section"),
-                        ("Enter", "Edit"),
-                        ("a", "Add"),
-                        ("d", "Delete"),
-                        ("S", "Bulk switch"),
-                        ("s", "Save"),
-                        ("Esc", "Back"),
-                    ],
-                    Section::MissingFrom(_) => vec![
-                        ("j/k", "Navigate"),
-                        ("Tab", "Next section"),
-                        ("Enter", "Add to .env"),
-                        ("Esc", "Back"),
-                    ],
-                }
-            }
+            View::ProjectDetail => vec![
+                ("j/k", "Navigate"),
+                ("h/l", "Cycle env"),
+                ("Enter", "Edit"),
+                ("a", "Add"),
+                ("d", "Delete"),
+                ("S", "Bulk switch"),
+                ("s", "Save"),
+                ("Esc", "Back"),
+            ],
             View::KeyEditor => vec![
                 ("j/k", "Select env"),
                 ("Enter", "Edit value"),

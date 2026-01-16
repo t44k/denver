@@ -28,12 +28,11 @@ pub struct AppState {
 }
 
 /// Which section of the project detail view is selected
+/// (Simplified - now only CurrentConfig since we have unified list)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Section {
-    /// Current .env configuration
+    /// Current unified configuration view
     CurrentConfig,
-    /// Missing keys from a specific environment
-    MissingFrom(EnvironmentType),
 }
 
 impl AppState {
@@ -95,16 +94,7 @@ impl AppState {
     /// Get the currently selected display item
     pub fn current_display_item(&self) -> Option<crate::models::DisplayItem> {
         let project = self.current_project()?;
-        match &self.selected_section {
-            Section::CurrentConfig => {
-                project.display_items().get(self.selected_key_index).cloned()
-            }
-            Section::MissingFrom(env_type) => {
-                let keys = project.missing_keys_for_env(env_type);
-                keys.get(self.selected_key_index)
-                    .map(|k| crate::models::DisplayItem::Key((*k).clone()))
-            }
-        }
+        project.unified_display_items().get(self.selected_key_index).cloned()
     }
 
     /// Get the currently selected key (returns None if a section header is selected)
@@ -113,6 +103,7 @@ impl AppState {
             crate::models::DisplayItem::Key(key) => Some(key),
             crate::models::DisplayItem::Section(_) => None,
             crate::models::DisplayItem::DuplicatedKey(key, _, _) => Some(key),
+            crate::models::DisplayItem::InactiveKey(key) => Some(key),
         }
     }
 
@@ -122,63 +113,31 @@ impl AppState {
             crate::models::DisplayItem::Section(name) => Some(name),
             crate::models::DisplayItem::Key(_) => None,
             crate::models::DisplayItem::DuplicatedKey(_, _, _) => None,
+            crate::models::DisplayItem::InactiveKey(_) => None,
         }
     }
 
-    /// Get the number of items in the current section (includes section headers for CurrentConfig)
+    /// Get the number of items in the unified list (includes section headers and inactive keys)
     pub fn current_section_item_count(&self) -> usize {
         let Some(project) = self.current_project() else {
             return 0;
         };
-        match &self.selected_section {
-            Section::CurrentConfig => project.display_item_count(),
-            Section::MissingFrom(env_type) => project.missing_keys_for_env(env_type).len(),
-        }
+        project.unified_display_item_count()
     }
 
-    /// Get all sections for the current project
+    /// Get all sections for the current project (simplified - only one section now)
     pub fn get_sections(&self) -> Vec<Section> {
-        let mut sections = vec![Section::CurrentConfig];
-        if let Some(project) = self.current_project() {
-            for env_type in project.named_env_types() {
-                if !project.missing_keys_for_env(env_type).is_empty() {
-                    sections.push(Section::MissingFrom(env_type.clone()));
-                }
-            }
-        }
-        sections
+        vec![Section::CurrentConfig]
     }
 
-    /// Move to next section
+    /// Move to next section (no-op with unified list)
     pub fn next_section(&mut self) {
-        let sections = self.get_sections();
-        if let Some(pos) = sections.iter().position(|s| *s == self.selected_section) {
-            if pos + 1 < sections.len() {
-                self.selected_section = sections[pos + 1].clone();
-                self.selected_key_index = 0;
-                // Reset scroll for the new section
-                if let Section::MissingFrom(ref env) = self.selected_section {
-                    self.missing_section_scrolls.insert(env.clone(), 0);
-                }
-            }
-        }
+        // No-op: unified list has only one section
     }
 
-    /// Move to previous section
+    /// Move to previous section (no-op with unified list)
     pub fn prev_section(&mut self) {
-        let sections = self.get_sections();
-        if let Some(pos) = sections.iter().position(|s| *s == self.selected_section) {
-            if pos > 0 {
-                self.selected_section = sections[pos - 1].clone();
-                self.selected_key_index = 0;
-                // Reset scroll for the new section
-                if self.selected_section == Section::CurrentConfig {
-                    self.config_scroll = 0;
-                } else if let Section::MissingFrom(ref env) = self.selected_section {
-                    self.missing_section_scrolls.insert(env.clone(), 0);
-                }
-            }
-        }
+        // No-op: unified list has only one section
     }
 
     pub fn has_unsaved_changes(&self) -> bool {
@@ -207,6 +166,14 @@ impl AppState {
         self.selected_key_index = 0;
         self.config_scroll = 0;
         self.missing_section_scrolls.clear();
+    }
+
+    /// Check if the currently selected item is an inactive key
+    pub fn is_current_item_inactive(&self) -> bool {
+        matches!(
+            self.current_display_item(),
+            Some(crate::models::DisplayItem::InactiveKey(_))
+        )
     }
 
     /// Get the section name for the currently selected key (if any)

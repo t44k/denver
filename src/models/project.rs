@@ -51,7 +51,15 @@ impl Project {
     }
 
     /// Set value for a key in the default environment
+    /// Creates the .env file if it doesn't exist (useful for enabling keys from k8s configs)
     pub fn set_default_value(&mut self, key: String, value: String) {
+        // Create Default environment if it doesn't exist
+        if !self.environments.contains_key(&EnvironmentType::Default) {
+            let env_path = self.path.join(".env");
+            let new_env = Environment::new(EnvironmentType::Default, env_path);
+            self.environments.insert(EnvironmentType::Default, new_env);
+        }
+
         if let Some(env) = self.environments.get_mut(&EnvironmentType::Default) {
             env.set(key, value);
         }
@@ -452,6 +460,60 @@ impl Project {
         self.display_items().len()
     }
 
+    /// Get all keys that exist in named environments but NOT in the default environment
+    /// Returns keys sorted alphabetically
+    pub fn inactive_keys(&self) -> Vec<String> {
+        let default_keys: std::collections::BTreeSet<_> = self
+            .environments
+            .get(&EnvironmentType::Default)
+            .map(|env| env.variables.keys().collect())
+            .unwrap_or_default();
+
+        let mut inactive: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (env_type, env) in &self.environments {
+            if *env_type == EnvironmentType::Default {
+                continue;
+            }
+            for key in env.variables.keys() {
+                if !default_keys.contains(key) {
+                    inactive.insert(key.clone());
+                }
+            }
+        }
+
+        inactive.into_iter().collect()
+    }
+
+    /// Get which environments have a specific key
+    pub fn envs_with_key(&self, key: &str) -> Vec<&EnvironmentType> {
+        self.environments
+            .iter()
+            .filter(|(env_type, env)| {
+                **env_type != EnvironmentType::Default && env.variables.contains_key(key)
+            })
+            .map(|(env_type, _)| env_type)
+            .collect()
+    }
+
+    /// Get all displayable items in a unified list:
+    /// - First: active keys (in .env) with their sections
+    /// - Then: inactive keys (in other envs but not in .env) shown in gray
+    pub fn unified_display_items(&self) -> Vec<super::DisplayItem> {
+        let mut items = self.display_items(); // Get active keys with sections
+
+        // Add inactive keys at the end
+        for key in self.inactive_keys() {
+            items.push(super::DisplayItem::InactiveKey(key));
+        }
+
+        items
+    }
+
+    /// Get the number of unified displayable items
+    pub fn unified_display_item_count(&self) -> usize {
+        self.unified_display_items().len()
+    }
+
     /// Move an item up
     /// - For keys in a section: only moves within the same section
     /// - For top-level keys (no section): can swap with adjacent sections
@@ -502,6 +564,10 @@ impl Project {
                     return None;
                 }
                 // Same section, we can swap with this key
+            }
+            super::DisplayItem::InactiveKey(_) => {
+                // Can't move above inactive keys (they're at the end)
+                return None;
             }
         }
 
@@ -577,6 +643,10 @@ impl Project {
                     return None;
                 }
                 // Same section, we can swap with this key
+            }
+            super::DisplayItem::InactiveKey(_) => {
+                // Can't move below inactive keys (active keys stay above inactive)
+                return None;
             }
         }
 
@@ -879,7 +949,7 @@ impl Project {
 
         let item = &items[display_index];
 
-        // Must be a key (not a section)
+        // Must be a key (not a section or inactive)
         let (key, old_line, is_dup) = match item {
             super::DisplayItem::Key(k) => {
                 let line = self.get_item_line(item)?;
@@ -887,6 +957,7 @@ impl Project {
             }
             super::DisplayItem::DuplicatedKey(k, _, ln) => (k.clone(), *ln, true),
             super::DisplayItem::Section(_) => return None,
+            super::DisplayItem::InactiveKey(_) => return None,
         };
 
         // Must not already be in a section
@@ -926,7 +997,7 @@ impl Project {
 
         let item = &items[display_index];
 
-        // Must be a key (not a section)
+        // Must be a key (not a section or inactive)
         let (key, old_line, is_dup) = match item {
             super::DisplayItem::Key(k) => {
                 let line = self.get_item_line(item)?;
@@ -934,6 +1005,7 @@ impl Project {
             }
             super::DisplayItem::DuplicatedKey(k, _, ln) => (k.clone(), *ln, true),
             super::DisplayItem::Section(_) => return None,
+            super::DisplayItem::InactiveKey(_) => return None,
         };
 
         // Must be in a section
@@ -978,6 +1050,7 @@ impl Project {
                     .and_then(|v| v.section.clone())
             }
             super::DisplayItem::Section(_) => None,
+            super::DisplayItem::InactiveKey(_) => None, // Inactive keys don't have sections
         }
     }
 
@@ -990,6 +1063,7 @@ impl Project {
             }
             super::DisplayItem::DuplicatedKey(_, _, line_num) => Some(*line_num),
             super::DisplayItem::Section(_) => None,
+            super::DisplayItem::InactiveKey(_) => None, // Inactive keys don't have line numbers
         }
     }
 
@@ -1061,12 +1135,14 @@ impl Project {
             super::DisplayItem::Key(k) => env.variables.get(k)?.line_number?,
             super::DisplayItem::DuplicatedKey(_, _, ln) => *ln,
             super::DisplayItem::Section(_) => return None,
+            super::DisplayItem::InactiveKey(_) => return None,
         };
 
         let line2 = match item2 {
             super::DisplayItem::Key(k) => env.variables.get(k)?.line_number?,
             super::DisplayItem::DuplicatedKey(_, _, ln) => *ln,
             super::DisplayItem::Section(_) => return None,
+            super::DisplayItem::InactiveKey(_) => return None,
         };
 
         // Update item1's line number only
@@ -1083,6 +1159,7 @@ impl Project {
                 }
             }
             super::DisplayItem::Section(_) => {}
+            super::DisplayItem::InactiveKey(_) => {}
         }
 
         // Update item2's line number only
@@ -1099,6 +1176,7 @@ impl Project {
                 }
             }
             super::DisplayItem::Section(_) => {}
+            super::DisplayItem::InactiveKey(_) => {}
         }
 
         env.is_dirty = true;
