@@ -280,17 +280,22 @@ fn render_select_env(frame: &mut Frame, area: Rect, key: &str, selected: usize, 
         .map(|(i, opt)| {
             let is_selected = i == selected;
             let is_current = current_index == Some(i);
+            let is_disable = opt.env_type.is_none();
 
             // Build styled line with colored env name
             let prefix = if is_selected { "> " } else { "  " };
             let current_marker = if is_current { "* " } else { "" };
 
+            // Use red for Disable option
+            let label_style = if is_disable { style_error() } else { style_header() };
+            let value_style = if is_disable { style_error() } else { style_muted() };
+
             let line = Line::from(vec![
                 Span::raw(prefix),
                 Span::styled(current_marker, style_success()),
-                Span::styled(&opt.label, style_header()),
+                Span::styled(&opt.label, label_style),
                 Span::raw(": "),
-                Span::styled(&opt.value, style_muted()),
+                Span::styled(&opt.value, value_style),
             ]);
 
             let item = ListItem::new(line);

@@ -86,8 +86,8 @@ fn scan_project_with_name(path: &Path, project_name: String) -> DenverResult<Opt
         let filename = entry.file_name();
         let filename_str = filename.to_string_lossy();
 
-        // Check if it's a .env file
-        if filename_str == ".env" || filename_str.starts_with(".env.") {
+        // Check if it's a .env file (skip backup files)
+        if (filename_str == ".env" || filename_str.starts_with(".env.")) && !filename_str.ends_with(".bak") {
             let env_path = entry.path();
             if env_path.is_file() {
                 match parse_env_file(&env_path) {

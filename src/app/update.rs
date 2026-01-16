@@ -489,6 +489,16 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                             }
                         }
 
+                        // Add "Disable" option if key is currently active (has value in .env)
+                        let is_active = project.get_value(&key, &EnvironmentType::Default).is_some();
+                        if is_active {
+                            options.push(super::EnvOption {
+                                env_type: None, // None indicates "Disable" option
+                                value: "(remove from .env)".to_string(),
+                                label: "Disable".to_string(),
+                            });
+                        }
+
                         // Only open dialog if there are options
                         if !options.is_empty() {
                             // Find current match to pre-select and mark as current
@@ -676,14 +686,18 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                     }
                     Dialog::SelectEnv { key, selected_index, options, .. } => {
                         if let Some(option) = options.get(selected_index) {
-                            if let Some(project) = state.current_project_mut() {
-                                if let Some(ref env_type) = option.env_type {
+                            if let Some(ref env_type) = option.env_type {
+                                // Set value from selected environment
+                                if let Some(project) = state.current_project_mut() {
                                     project.set_value_from_env(&key, env_type);
                                     state.show_message(
                                         format!("Set {} to {} value", key, env_type),
                                         MessageLevel::Success,
                                     );
                                 }
+                            } else {
+                                // Disable option selected - remove from .env
+                                return Some(Action::DisableKey { key });
                             }
                         }
                     }
