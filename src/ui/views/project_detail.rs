@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::{AppState, Section};
 use crate::models::{DisplayItem, EnvironmentType};
-use crate::ui::pagination::{calculate_visible_range, scroll_status};
+use crate::ui::pagination::{calculate_visible_range, calculate_visible_range_multiline, scroll_status};
 use crate::ui::styles::*;
 
 pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
@@ -56,13 +56,45 @@ fn render_current_config(
     let display_items = project.display_items();
     let total_items = display_items.len();
 
+    // Pre-calculate the line height for each display item
+    let item_heights: Vec<usize> = display_items
+        .iter()
+        .map(|item| match item {
+            DisplayItem::Section(section_name) => {
+                let section_matching_envs = project.find_section_matching_envs(section_name);
+                if section_matching_envs.is_empty() {
+                    1 // custom section - single line
+                } else {
+                    section_matching_envs.len() // one line per environment
+                }
+            }
+            DisplayItem::Key(key) => {
+                let has_duplicates = project
+                    .environments
+                    .get(&EnvironmentType::Default)
+                    .map(|env| env.has_duplicates(key))
+                    .unwrap_or(false);
+                if has_duplicates {
+                    1 // duplicated keys show single line
+                } else {
+                    let matching_envs = project.find_all_matching_envs(key);
+                    if matching_envs.is_empty() {
+                        1 // custom - single line
+                    } else {
+                        matching_envs.len() // one line per environment
+                    }
+                }
+            }
+            DisplayItem::DuplicatedKey(_, _, _) => 1, // always single line
+        })
+        .collect();
+
+    let total_lines: usize = item_heights.iter().sum();
+
     // Calculate scroll status for title
+    let visible_height = area.height.saturating_sub(6) as usize; // Account for borders, header line, and hint
     let scroll_info = if is_active {
-        scroll_status(
-            state.config_scroll,
-            area.height.saturating_sub(6) as usize, // Account for borders, header line, and hint
-            total_items,
-        )
+        scroll_status(state.config_scroll, visible_height, total_lines)
     } else {
         String::new()
     };
@@ -104,17 +136,28 @@ fn render_current_config(
     ]);
     frame.render_widget(Paragraph::new(header), chunks[0]);
 
-    // Calculate visible range for pagination
-    let visible_height = chunks[1].height as usize;
-    let (start, end) = if is_active {
-        calculate_visible_range(
-            total_items,
-            state.selected_key_index,
+    // Calculate visible range for pagination using multiline-aware function
+    let list_visible_height = chunks[1].height as usize;
+    let (start, end) = if is_active && !item_heights.is_empty() {
+        let selected = state.selected_key_index.min(total_items.saturating_sub(1));
+        calculate_visible_range_multiline(
+            &item_heights,
+            selected,
             &mut state.config_scroll,
-            visible_height,
+            list_visible_height,
         )
     } else {
-        (0, visible_height.min(total_items))
+        // For inactive view, show items that fit from the beginning
+        let mut lines_used = 0;
+        let mut end_idx = 0;
+        for &h in &item_heights {
+            if lines_used + h > list_visible_height {
+                break;
+            }
+            lines_used += h;
+            end_idx += 1;
+        }
+        (0, end_idx.max(1).min(total_items))
     };
 
     // Create list items only for visible range
