@@ -22,6 +22,10 @@ struct Args {
     /// Directory to scan for projects (defaults to current directory)
     #[arg(short, long)]
     path: Option<PathBuf>,
+
+    /// Output filename for saving (e.g., -o .env.local). Saves to this file in each project's directory.
+    #[arg(short, long = "output-file-name")]
+    output: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -33,8 +37,8 @@ fn main() -> anyhow::Result<()> {
     // Scan for projects
     let projects = scan_directory(&root)?;
 
-    // Initialize state
-    let mut state = AppState::new(projects);
+    // Initialize state with optional output path
+    let mut state = AppState::new(projects, args.output);
 
     // Setup terminal
     enable_raw_mode()?;

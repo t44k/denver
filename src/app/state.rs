@@ -23,6 +23,8 @@ pub struct AppState {
     pub config_scroll: usize,
     pub missing_section_scrolls: HashMap<EnvironmentType, usize>,
     pub dialog_scroll: usize,
+    /// Output filename for saving (specified via -o flag). Saved to each project's directory.
+    pub output_filename: Option<String>,
 }
 
 /// Which section of the project detail view is selected
@@ -35,7 +37,7 @@ pub enum Section {
 }
 
 impl AppState {
-    pub fn new(projects: Vec<Project>) -> Self {
+    pub fn new(projects: Vec<Project>, output_filename: Option<String>) -> Self {
         Self {
             projects,
             selected_project_index: 0,
@@ -53,6 +55,7 @@ impl AppState {
             config_scroll: 0,
             missing_section_scrolls: HashMap::new(),
             dialog_scroll: 0,
+            output_filename,
         }
     }
 

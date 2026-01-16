@@ -18,8 +18,21 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
         return;
     };
 
+    // Determine target filename (output filename or default .env)
+    let target_name = state
+        .output_filename
+        .as_deref()
+        .unwrap_or(".env");
+
+    // Build title with target indicator in green
+    let title = Line::from(vec![
+        Span::styled(format!(" Edit: {} ", key), style_header()),
+        Span::styled("| Target: ", style_muted()),
+        Span::styled(format!("{} ", target_name), style_target()),
+    ]);
+
     let block = Block::default()
-        .title(Span::styled(format!(" Edit: {} ", key), style_header()))
+        .title(title)
         .borders(Borders::ALL)
         .border_style(style_border_focused())
         .padding(Padding::uniform(1));
@@ -27,9 +40,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Get all named envs plus a "custom" option
+    // Get all named envs: target (.env) first, then named envs
     let env_types = project.named_env_types();
-    let slot_count = env_types.len() + 1; // +1 for custom
+    let slot_count = 1 + env_types.len(); // target + named envs
 
     // Create constraints for each slot
     let constraints: Vec<Constraint> = (0..slot_count)
@@ -38,44 +51,39 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
 
     let chunks = Layout::vertical(constraints).split(inner);
 
-    // Render each env slot
+    // Render target slot first (index 0)
+    let is_target_selected = state.selected_key_index == 0;
+    let target_value = project.get_value(key, &EnvironmentType::Default).unwrap_or("");
+    let target_label = format!("{} (target)", target_name);
+
+    render_env_slot(
+        frame,
+        chunks[0],
+        &target_label,
+        target_value,
+        is_target_selected,
+        state.input_mode == InputMode::Editing && is_target_selected,
+        &state.input_buffer,
+        true, // is_target
+    );
+
+    // Render each named env slot (indices 1..n)
     for (idx, env_type) in env_types.iter().enumerate() {
-        let is_selected = idx == state.selected_key_index;
+        let slot_idx = idx + 1; // offset by 1 for target slot
+        let is_selected = slot_idx == state.selected_key_index;
         let value = project.get_value(key, env_type).unwrap_or("");
 
         render_env_slot(
             frame,
-            chunks[idx],
+            chunks[slot_idx],
             &env_type.filename(),
             value,
             is_selected,
             state.input_mode == InputMode::Editing && is_selected,
             &state.input_buffer,
+            false, // not target
         );
     }
-
-    // Render custom slot (last)
-    let custom_idx = env_types.len();
-    let is_custom_selected = custom_idx == state.selected_key_index;
-    let current_value = project.get_value(key, &EnvironmentType::Default).unwrap_or("");
-
-    // Check if current value is custom (doesn't match any env)
-    let is_custom = project.find_matching_env(key).is_none();
-    let custom_label = if is_custom {
-        "custom (current)"
-    } else {
-        "custom"
-    };
-
-    render_env_slot(
-        frame,
-        chunks[custom_idx],
-        custom_label,
-        current_value,
-        is_custom_selected,
-        state.input_mode == InputMode::Editing && is_custom_selected,
-        &state.input_buffer,
-    );
 }
 
 fn render_env_slot(
@@ -86,14 +94,27 @@ fn render_env_slot(
     is_selected: bool,
     is_editing: bool,
     input_buffer: &str,
+    is_target: bool,
 ) {
-    let border_style = if is_selected {
+    let border_style = if is_target {
+        if is_selected {
+            style_target_selected()
+        } else {
+            style_target()
+        }
+    } else if is_selected {
         style_border_focused()
     } else {
         style_border()
     };
 
-    let title_style = if is_selected {
+    let title_style = if is_target {
+        if is_selected {
+            style_target_selected()
+        } else {
+            style_target()
+        }
+    } else if is_selected {
         style_header()
     } else {
         style_muted()

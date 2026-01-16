@@ -11,6 +11,11 @@ use crate::models::Project;
 pub fn scan_directory(root: &Path) -> DenverResult<Vec<Project>> {
     let mut projects = Vec::new();
 
+    // First, check if the root directory itself has .env files
+    if let Some(root_project) = scan_project_with_name(root, "/".to_string())? {
+        projects.push(root_project);
+    }
+
     let entries = std::fs::read_dir(root).map_err(|e| DenverError::DirectoryScan {
         path: root.to_path_buf(),
         source: e,
@@ -42,8 +47,15 @@ pub fn scan_directory(root: &Path) -> DenverResult<Vec<Project>> {
         }
     }
 
-    // Sort projects by name
-    projects.sort_by(|a, b| a.name.cmp(&b.name));
+    // Sort projects by name (but "/" should stay at top)
+    projects.sort_by(|a, b| {
+        match (a.name.as_str(), b.name.as_str()) {
+            ("/", "/") => std::cmp::Ordering::Equal,
+            ("/", _) => std::cmp::Ordering::Less,
+            (_, "/") => std::cmp::Ordering::Greater,
+            _ => a.name.cmp(&b.name),
+        }
+    });
 
     Ok(projects)
 }
@@ -56,6 +68,11 @@ fn scan_project(path: &Path) -> DenverResult<Option<Project>> {
         .unwrap_or("unknown")
         .to_string();
 
+    scan_project_with_name(path, project_name)
+}
+
+/// Scan a single directory as a potential project with a custom name
+fn scan_project_with_name(path: &Path, project_name: String) -> DenverResult<Option<Project>> {
     let mut project = Project::new(project_name, path.to_path_buf());
 
     // Scan for all .env* files

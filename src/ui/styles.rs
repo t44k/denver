@@ -98,3 +98,14 @@ pub fn style_duplicated() -> Style {
         .fg(ERROR)
         .add_modifier(Modifier::BOLD)
 }
+
+pub fn style_target() -> Style {
+    Style::default()
+        .fg(Color::Rgb(100, 180, 100))
+}
+
+pub fn style_target_selected() -> Style {
+    Style::default()
+        .fg(Color::Rgb(150, 255, 150))
+        .add_modifier(Modifier::BOLD)
+}

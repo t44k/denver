@@ -1,4 +1,4 @@
-use crate::io::save_project;
+use crate::io::{save_project, save_project_to_output};
 use crate::models::EnvironmentType;
 
 use super::{Action, AppState, Dialog, DialogAction, InputMode, MessageLevel, Section, View};
@@ -48,10 +48,10 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                     }
                 }
                 View::KeyEditor => {
-                    // Navigate between env fields + custom
+                    // Navigate between target + env fields
                     if let Some(project) = state.current_project() {
-                        let env_count = project.named_env_types().len() + 1; // +1 for custom
-                        if state.selected_key_index < env_count.saturating_sub(1) {
+                        let slot_count = 1 + project.named_env_types().len(); // target + named
+                        if state.selected_key_index < slot_count.saturating_sub(1) {
                             state.selected_key_index += 1;
                         }
                     }
@@ -208,17 +208,18 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                     state.input_buffer.clear();
 
                     // Determine which slot was being edited
+                    // Slot layout: 0 = target (.env), 1..n = named envs
                     if let Some(project) = state.current_project() {
                         let env_types = project.named_env_types();
                         let slot_index = state.selected_key_index;
 
-                        if slot_index < env_types.len() {
-                            // Editing a named env value
-                            let env_type = env_types[slot_index].clone();
-                            return Some(Action::SetValue { key, env: env_type, value });
-                        } else {
-                            // Editing custom value (goes directly to .env)
+                        if slot_index == 0 {
+                            // Editing target (.env) value
                             return Some(Action::SetCustomValue { key, value });
+                        } else if slot_index <= env_types.len() {
+                            // Editing a named env value (indices 1..n)
+                            let env_type = env_types[slot_index - 1].clone();
+                            return Some(Action::SetValue { key, env: env_type, value });
                         }
                     }
                 }
@@ -571,6 +572,24 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
 
         Action::SaveAll => {
             let mut total_saved = 0;
+
+            // If output filename is specified, save to that file in each project's directory
+            if let Some(ref output_filename) = state.output_filename {
+                for project in &state.projects {
+                    if let Err(e) = save_project_to_output(project, output_filename) {
+                        state.show_message(format!("Error saving to output: {}", e), MessageLevel::Error);
+                        return None;
+                    }
+                    total_saved += 1;
+                }
+                state.show_message(
+                    format!("Saved {} project(s) to {}", total_saved, output_filename),
+                    MessageLevel::Success,
+                );
+                return None;
+            }
+
+            // Otherwise, save to original files
             for project in &mut state.projects {
                 match save_project(project, true) {
                     Ok(count) => total_saved += count,
@@ -627,11 +646,22 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
 
         Action::SaveAndQuit => {
             state.dialog = None;
-            // Save all and then quit
-            for project in &mut state.projects {
-                if let Err(e) = save_project(project, true) {
-                    state.show_message(format!("Error saving: {}", e), MessageLevel::Error);
-                    return None;
+
+            // If output filename is specified, save to that file in each project's directory
+            if let Some(ref output_filename) = state.output_filename {
+                for project in &state.projects {
+                    if let Err(e) = save_project_to_output(project, output_filename) {
+                        state.show_message(format!("Error saving to output: {}", e), MessageLevel::Error);
+                        return None;
+                    }
+                }
+            } else {
+                // Otherwise, save to original files and quit
+                for project in &mut state.projects {
+                    if let Err(e) = save_project(project, true) {
+                        state.show_message(format!("Error saving: {}", e), MessageLevel::Error);
+                        return None;
+                    }
                 }
             }
             state.should_quit = true;
@@ -706,6 +736,7 @@ fn cycle_env_value(state: &mut AppState, forward: bool) {
 }
 
 /// Get the value for the selected slot in key editor
+/// Slot layout: 0 = target (.env), 1..n = named envs
 fn get_editor_slot_value(state: &AppState, key: &str) -> String {
     let Some(project) = state.current_project() else {
         return String::new();
@@ -714,11 +745,13 @@ fn get_editor_slot_value(state: &AppState, key: &str) -> String {
     let env_types = project.named_env_types();
     let slot_index = state.selected_key_index;
 
-    if slot_index < env_types.len() {
-        // Named env slot
-        project.get_value(key, env_types[slot_index]).unwrap_or("").to_string()
-    } else {
-        // Custom slot - get current .env value
+    if slot_index == 0 {
+        // Target slot - get .env value
         project.get_value(key, &EnvironmentType::Default).unwrap_or("").to_string()
+    } else if slot_index <= env_types.len() {
+        // Named env slot (indices 1..n)
+        project.get_value(key, env_types[slot_index - 1]).unwrap_or("").to_string()
+    } else {
+        String::new()
     }
 }
