@@ -1,0 +1,25 @@
+[package]
+name = "denver"
+version = "0.1.0"
+edition = "2024"
+description = "A TUI application for managing .env files across multiple projects"
+license = "MIT"
+
+[dependencies]
+# TUI Framework
+ratatui = "0.29"
+crossterm = "0.28"
+
+# CLI argument parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Text input widget
+tui-input = "0.11"
+
+[[bin]]
+name = "denver"
+path = "src/main.rs"

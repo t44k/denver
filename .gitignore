@@ -1,0 +1,35 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock for binaries is typically committed, but ignore if needed
+# Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files (ironic for an env file manager, but keep your own secrets safe)
+.env.local
+.env.*.local
+
+# Debug files
+*.log
+debug/
+
+# Backup files created by denver itself
+*.bak
+
+# Coverage reports
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+
+# Documentation build output
+/doc/
