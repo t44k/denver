@@ -12,6 +12,8 @@ pub enum EnvironmentType {
     Named(String),
     /// Kubernetes manifest environment variables
     Kubernetes {
+        /// Subdirectory path under .k8s (e.g., "overlays/production")
+        subdir: Option<String>,
         resource_name: String,
         container_name: Option<String>,
     },
@@ -32,35 +34,39 @@ impl EnvironmentType {
         match self {
             Self::Default => ".env".to_string(),
             Self::Named(name) => name.clone(),
-            Self::Kubernetes { resource_name, container_name } => {
-                match container_name {
-                    Some(container) => format!("k8s.{}.{}", resource_name, container),
-                    None => format!("k8s.{}", resource_name),
+            Self::Kubernetes { subdir, resource_name, container_name } => {
+                // Format: k8s:subdir:resource or k8s:resource (colons as separators)
+                let mut parts = vec!["k8s".to_string()];
+                if let Some(sd) = subdir {
+                    // Convert path separators to colons
+                    parts.push(sd.replace(['/', '\\'], ":"));
                 }
+                parts.push(resource_name.clone());
+                if let Some(container) = container_name {
+                    parts.push(container.clone());
+                }
+                parts.join(":")
             }
         }
     }
 
     pub fn filename(&self) -> String {
-        match self {
-            Self::Default => ".env".to_string(),
-            Self::Named(name) => format!(".env.{}", name),
-            Self::Kubernetes { resource_name, container_name } => {
-                match container_name {
-                    Some(container) => format!("k8s.{}.{}", resource_name, container),
-                    None => format!("k8s.{}", resource_name),
-                }
-            }
-        }
+        // For K8s, filename() returns the same as display_name()
+        self.display_name()
     }
 
     /// Returns sort order priority (Default first, then Named alphabetical, then K8s)
-    pub fn sort_key(&self) -> (u8, String, String) {
+    pub fn sort_key(&self) -> (u8, String, String, String) {
         match self {
-            Self::Default => (0, String::new(), String::new()),
-            Self::Named(name) => (1, name.clone(), String::new()),
-            Self::Kubernetes { resource_name, container_name } => {
-                (2, resource_name.clone(), container_name.clone().unwrap_or_default())
+            Self::Default => (0, String::new(), String::new(), String::new()),
+            Self::Named(name) => (1, name.clone(), String::new(), String::new()),
+            Self::Kubernetes { subdir, resource_name, container_name } => {
+                (
+                    2,
+                    subdir.clone().unwrap_or_default(),
+                    resource_name.clone(),
+                    container_name.clone().unwrap_or_default(),
+                )
             }
         }
     }

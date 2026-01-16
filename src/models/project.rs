@@ -1528,6 +1528,7 @@ mod tests {
         let mut project = Project::new("test".to_string(), PathBuf::from("/tmp/test"));
 
         let k8s_env_type = EnvironmentType::Kubernetes {
+            subdir: None,
             resource_name: "my-app".to_string(),
             container_name: None,
         };

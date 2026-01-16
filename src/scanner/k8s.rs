@@ -104,25 +104,45 @@ struct K8sFieldRef {
     field_path: String,
 }
 
-/// Scan a .k8s directory for K8s manifests and extract environments
+/// Scan a .k8s directory recursively for K8s manifests and extract environments
 pub fn scan_k8s_directory(path: &Path) -> DenverResult<Vec<Environment>> {
     let mut environments = Vec::new();
+    scan_k8s_directory_recursive(path, path, &mut environments)?;
+    Ok(environments)
+}
 
-    let entries = std::fs::read_dir(path).map_err(|e| DenverError::DirectoryScan {
-        path: path.to_path_buf(),
+/// Recursively scan a directory for K8s manifests
+fn scan_k8s_directory_recursive(
+    root: &Path,
+    current: &Path,
+    environments: &mut Vec<Environment>,
+) -> DenverResult<()> {
+    let entries = std::fs::read_dir(current).map_err(|e| DenverError::DirectoryScan {
+        path: current.to_path_buf(),
         source: e,
     })?;
 
     for entry in entries.flatten() {
         let file_path = entry.path();
 
-        // Only process .yaml and .yml files
-        if let Some(ext) = file_path.extension() {
+        if file_path.is_dir() {
+            // Recursively scan subdirectories
+            if let Err(e) = scan_k8s_directory_recursive(root, &file_path, environments) {
+                eprintln!("Warning: Could not scan K8s subdirectory {}: {}", file_path.display(), e);
+            }
+        } else if let Some(ext) = file_path.extension() {
+            // Only process .yaml and .yml files
             if ext == "yaml" || ext == "yml" {
-                match parse_k8s_file(&file_path) {
+                // Calculate relative subdir from root
+                let subdir = file_path
+                    .parent()
+                    .and_then(|p| p.strip_prefix(root).ok())
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map(|p| p.to_string_lossy().to_string());
+
+                match parse_k8s_file(&file_path, subdir.as_deref()) {
                     Ok(mut envs) => environments.append(&mut envs),
                     Err(e) => {
-                        // Log warning but continue with other files
                         eprintln!("Warning: Could not parse K8s file {}: {}", file_path.display(), e);
                     }
                 }
@@ -130,11 +150,12 @@ pub fn scan_k8s_directory(path: &Path) -> DenverResult<Vec<Environment>> {
         }
     }
 
-    Ok(environments)
+    Ok(())
 }
 
 /// Parse a single K8s YAML file and extract environments
-pub fn parse_k8s_file(path: &Path) -> DenverResult<Vec<Environment>> {
+/// `subdir` is the relative path from the .k8s root (e.g., "overlays/production")
+pub fn parse_k8s_file(path: &Path, subdir: Option<&str>) -> DenverResult<Vec<Environment>> {
     let content = std::fs::read_to_string(path).map_err(|e| DenverError::FileRead {
         path: path.to_path_buf(),
         source: e,
@@ -149,7 +170,7 @@ pub fn parse_k8s_file(path: &Path) -> DenverResult<Vec<Environment>> {
             continue;
         }
 
-        match parse_k8s_document(trimmed, path) {
+        match parse_k8s_document(trimmed, path, subdir) {
             Ok(mut envs) => environments.append(&mut envs),
             Err(_) => {
                 // Skip documents that don't parse as K8s manifests
@@ -162,7 +183,7 @@ pub fn parse_k8s_file(path: &Path) -> DenverResult<Vec<Environment>> {
 }
 
 /// Parse a single YAML document as a K8s manifest
-fn parse_k8s_document(content: &str, path: &Path) -> DenverResult<Vec<Environment>> {
+fn parse_k8s_document(content: &str, path: &Path, subdir: Option<&str>) -> DenverResult<Vec<Environment>> {
     let manifest: K8sManifest = serde_yaml::from_str(content).map_err(|e| {
         DenverError::K8sParseError {
             path: path.to_path_buf(),
@@ -189,6 +210,7 @@ fn parse_k8s_document(content: &str, path: &Path) -> DenverResult<Vec<Environmen
         }
 
         let env_type = EnvironmentType::Kubernetes {
+            subdir: subdir.map(String::from),
             resource_name: manifest.metadata.name.clone(),
             container_name: if has_multiple_containers {
                 Some(container.name.clone())
@@ -289,7 +311,7 @@ spec:
             - name: SECRET
               value: "abc123"
 "#;
-        let envs = parse_k8s_document(yaml, Path::new("test.yaml")).unwrap();
+        let envs = parse_k8s_document(yaml, Path::new("test.yaml"), None).unwrap();
         assert_eq!(envs.len(), 1);
 
         let env = &envs[0];
@@ -297,6 +319,33 @@ spec:
         assert_eq!(env.get_value("PORT"), Some("8080"));
         assert_eq!(env.get_value("SECRET"), Some("abc123"));
         assert!(env.is_readonly);
+
+        // Check display name without subdir
+        assert_eq!(env.env_type.display_name(), "k8s:test-app");
+    }
+
+    #[test]
+    fn test_parse_deployment_with_subdir() {
+        let yaml = r#"
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: main
+          env:
+            - name: PORT
+              value: "8080"
+"#;
+        let envs = parse_k8s_document(yaml, Path::new("test.yaml"), Some("overlays/production")).unwrap();
+        assert_eq!(envs.len(), 1);
+
+        let env = &envs[0];
+        // Check display name with subdir (colons as separators)
+        assert_eq!(env.env_type.display_name(), "k8s:overlays:production:api-server");
     }
 
     #[test]
@@ -319,7 +368,7 @@ spec:
             - name: LOG_LEVEL
               value: "debug"
 "#;
-        let envs = parse_k8s_document(yaml, Path::new("test.yaml")).unwrap();
+        let envs = parse_k8s_document(yaml, Path::new("test.yaml"), None).unwrap();
         assert_eq!(envs.len(), 2);
 
         // Check that container names are included when there are multiple containers
@@ -329,6 +378,10 @@ spec:
             }
             _ => panic!("Expected Kubernetes environment type"),
         }
+
+        // Check display names include container
+        assert_eq!(envs[0].env_type.display_name(), "k8s:multi-container:main");
+        assert_eq!(envs[1].env_type.display_name(), "k8s:multi-container:sidecar");
     }
 
     #[test]
@@ -350,7 +403,7 @@ spec:
                   name: db-secrets
                   key: password
 "#;
-        let envs = parse_k8s_document(yaml, Path::new("test.yaml")).unwrap();
+        let envs = parse_k8s_document(yaml, Path::new("test.yaml"), None).unwrap();
         assert_eq!(envs.len(), 1);
 
         let env = &envs[0];
@@ -368,7 +421,7 @@ spec:
   ports:
     - port: 80
 "#;
-        let envs = parse_k8s_document(yaml, Path::new("test.yaml")).unwrap();
+        let envs = parse_k8s_document(yaml, Path::new("test.yaml"), None).unwrap();
         assert!(envs.is_empty());
     }
 
@@ -391,7 +444,7 @@ spec:
                 - name: BACKUP_PATH
                   value: "/data"
 "#;
-        let envs = parse_k8s_document(yaml, Path::new("test.yaml")).unwrap();
+        let envs = parse_k8s_document(yaml, Path::new("test.yaml"), None).unwrap();
         assert_eq!(envs.len(), 1);
         assert_eq!(envs[0].get_value("BACKUP_PATH"), Some("/data"));
     }
