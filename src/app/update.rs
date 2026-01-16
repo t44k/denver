@@ -328,6 +328,7 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
 
         Action::BulkSwitch => {
             state.dialog = Some(Dialog::BulkSwitch { selected_env_index: 0 });
+            state.dialog_scroll = 0;
             None
         }
 
@@ -364,6 +365,7 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                                 current_index,
                                 options,
                             });
+                            state.dialog_scroll = 0;
                         }
                     }
                 }
@@ -410,6 +412,7 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                             current_indices,
                             options,
                         });
+                        state.dialog_scroll = 0;
                     }
                 }
             }

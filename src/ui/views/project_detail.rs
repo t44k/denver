@@ -7,13 +7,10 @@ use ratatui::{
 
 use crate::app::{AppState, Section};
 use crate::models::{DisplayItem, EnvironmentType};
+use crate::ui::pagination::{calculate_visible_range, scroll_status};
 use crate::ui::styles::*;
 
-pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-    let Some(project) = state.current_project() else {
-        return;
-    };
-
+pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
     // Split area for current config and missing sections
     let sections = state.get_sections();
     let has_missing = sections.len() > 1;
@@ -28,19 +25,25 @@ pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         Layout::vertical([Constraint::Percentage(100)]).split(area)
     };
 
+    // Clone project data needed for rendering to avoid borrow conflicts
+    let project = match state.current_project() {
+        Some(p) => p.clone(),
+        None => return,
+    };
+
     // Render current config section
-    render_current_config(frame, chunks[0], state, project);
+    render_current_config(frame, chunks[0], state, &project);
 
     // Render missing sections if any
     if has_missing {
-        render_missing_sections(frame, chunks[1], state, project, &sections);
+        render_missing_sections(frame, chunks[1], state, &project, &sections);
     }
 }
 
 fn render_current_config(
     frame: &mut Frame,
     area: Rect,
-    state: &AppState,
+    state: &mut AppState,
     project: &crate::models::Project,
 ) {
     let is_active = state.selected_section == Section::CurrentConfig;
@@ -50,8 +53,25 @@ fn render_current_config(
         style_border()
     };
 
+    let display_items = project.display_items();
+    let total_items = display_items.len();
+
+    // Calculate scroll status for title
+    let scroll_info = if is_active {
+        scroll_status(
+            state.config_scroll,
+            area.height.saturating_sub(6) as usize, // Account for borders, header line, and hint
+            total_items,
+        )
+    } else {
+        String::new()
+    };
+
     let block = Block::default()
-        .title(Span::styled(" Current Configuration (.env) ", style_header()))
+        .title(Span::styled(
+            format!(" Current Configuration (.env){} ", scroll_info),
+            style_header(),
+        ))
         .borders(Borders::ALL)
         .border_style(border_style)
         .padding(Padding::horizontal(1));
@@ -59,7 +79,6 @@ fn render_current_config(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let display_items = project.display_items();
     if display_items.is_empty() {
         let empty_msg = Paragraph::new(Span::styled(
             "No environment variables in .env",
@@ -69,10 +88,11 @@ fn render_current_config(
         return;
     }
 
-    // Split inner area for list and hint
+    // Split inner area for header, list, and hint
     let chunks = Layout::vertical([
-        Constraint::Min(3),
-        Constraint::Length(1),
+        Constraint::Length(1), // Header row
+        Constraint::Min(1),    // List
+        Constraint::Length(1), // Hint
     ])
     .split(inner);
 
@@ -82,11 +102,25 @@ fn render_current_config(
         Span::styled(format!("{:<15}", "Environment"), style_header()),
         Span::styled("Value", style_header()),
     ]);
+    frame.render_widget(Paragraph::new(header), chunks[0]);
 
-    // Create list items
-    let mut items: Vec<ListItem> = vec![ListItem::new(header)];
+    // Calculate visible range for pagination
+    let visible_height = chunks[1].height as usize;
+    let (start, end) = if is_active {
+        calculate_visible_range(
+            total_items,
+            state.selected_key_index,
+            &mut state.config_scroll,
+            visible_height,
+        )
+    } else {
+        (0, visible_height.min(total_items))
+    };
 
-    for (idx, item) in display_items.iter().enumerate() {
+    // Create list items only for visible range
+    let mut items: Vec<ListItem> = Vec::new();
+
+    for (idx, item) in display_items.iter().enumerate().skip(start).take(end - start) {
         let is_selected = is_active && idx == state.selected_key_index;
 
         match item {
@@ -272,7 +306,7 @@ fn render_current_config(
     }
 
     let list = List::new(items);
-    frame.render_widget(list, chunks[0]);
+    frame.render_widget(list, chunks[1]);
 
     // Render hint at bottom
     let hint = Line::from(vec![
@@ -285,13 +319,13 @@ fn render_current_config(
         Span::styled("S", style_header()),
         Span::raw(" bulk switch"),
     ]);
-    frame.render_widget(Paragraph::new(hint), chunks[1]);
+    frame.render_widget(Paragraph::new(hint), chunks[2]);
 }
 
 fn render_missing_sections(
     frame: &mut Frame,
     area: Rect,
-    state: &AppState,
+    state: &mut AppState,
     project: &crate::models::Project,
     sections: &[Section],
 ) {
@@ -326,7 +360,7 @@ fn render_missing_sections(
 fn render_missing_section(
     frame: &mut Frame,
     area: Rect,
-    state: &AppState,
+    state: &mut AppState,
     project: &crate::models::Project,
     env_type: &EnvironmentType,
     is_active: bool,
@@ -337,9 +371,24 @@ fn render_missing_section(
         style_border()
     };
 
+    let missing_keys = project.missing_keys_for_env(env_type);
+    let total_items = missing_keys.len();
+
+    // Calculate scroll status for title
+    let scroll_info = if is_active {
+        let current_scroll = state.get_missing_scroll(env_type);
+        scroll_status(
+            current_scroll,
+            area.height.saturating_sub(4) as usize, // Account for borders
+            total_items,
+        )
+    } else {
+        String::new()
+    };
+
     let block = Block::default()
         .title(Span::styled(
-            format!(" Missing from {} ", env_type.filename()),
+            format!(" Missing from {}{} ", env_type.filename(), scroll_info),
             if is_active { style_header() } else { style_muted() },
         ))
         .borders(Borders::ALL)
@@ -349,14 +398,31 @@ fn render_missing_section(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let missing_keys = project.missing_keys_for_env(env_type);
     if missing_keys.is_empty() {
         return;
     }
 
+    // Calculate visible range for pagination
+    let visible_height = inner.height as usize;
+    let (start, end) = if is_active {
+        let mut scroll = state.get_missing_scroll(env_type);
+        let range = calculate_visible_range(
+            total_items,
+            state.selected_key_index,
+            &mut scroll,
+            visible_height,
+        );
+        state.set_missing_scroll(env_type, scroll);
+        range
+    } else {
+        (0, visible_height.min(total_items))
+    };
+
     let items: Vec<ListItem> = missing_keys
         .iter()
         .enumerate()
+        .skip(start)
+        .take(end - start)
         .map(|(idx, key)| {
             let is_selected = is_active && idx == state.selected_key_index;
 

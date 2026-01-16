@@ -6,9 +6,10 @@ use ratatui::{
 };
 
 use crate::app::{AppState, Dialog, EnvOption};
+use crate::ui::pagination::{calculate_visible_range, scroll_status};
 use crate::ui::styles::*;
 
-pub fn render(frame: &mut Frame, dialog: &Dialog, state: &AppState) {
+pub fn render(frame: &mut Frame, dialog: &Dialog, state: &mut AppState) {
     let area = centered_rect(60, 40, frame.area());
 
     // Clear the area behind the dialog
@@ -28,10 +29,10 @@ pub fn render(frame: &mut Frame, dialog: &Dialog, state: &AppState) {
             render_bulk_switch(frame, area, state, *selected_env_index);
         }
         Dialog::SelectEnv { key, selected_index, current_index, options } => {
-            render_select_env(frame, area, key, *selected_index, *current_index, options);
+            render_select_env(frame, area, key, *selected_index, *current_index, options, state);
         }
         Dialog::SelectSectionEnv { section, selected_index, current_indices, options } => {
-            render_select_section_env(frame, area, section, *selected_index, current_indices, options);
+            render_select_section_env(frame, area, section, *selected_index, current_indices, options, state);
         }
         Dialog::UnsavedChanges => {
             render_unsaved_changes(frame, area);
@@ -146,9 +147,21 @@ fn render_add_key(frame: &mut Frame, area: Rect, key: &str, value: &str, focus_o
     frame.render_widget(hint, chunks[5]);
 }
 
-fn render_bulk_switch(frame: &mut Frame, area: Rect, state: &AppState, selected: usize) {
+fn render_bulk_switch(frame: &mut Frame, area: Rect, state: &mut AppState, selected: usize) {
+    let env_types: Vec<_> = state
+        .current_project()
+        .map(|p| p.sorted_env_types().into_iter().cloned().collect())
+        .unwrap_or_default();
+    let total_items = env_types.len();
+
+    let scroll_info = scroll_status(
+        state.dialog_scroll,
+        area.height.saturating_sub(8) as usize,
+        total_items,
+    );
+
     let block = Block::default()
-        .title(Span::styled(" Bulk Switch - Replace .env ", style_title()))
+        .title(Span::styled(format!(" Bulk Switch - Replace .env{} ", scroll_info), style_title()))
         .borders(Borders::ALL)
         .border_style(style_border_focused());
 
@@ -165,11 +178,20 @@ fn render_bulk_switch(frame: &mut Frame, area: Rect, state: &AppState, selected:
     let info = Paragraph::new("Select environment to copy all values from:").style(style_muted());
     frame.render_widget(info, chunks[0]);
 
-    if let Some(project) = state.current_project() {
-        let items: Vec<ListItem> = project
-            .sorted_env_types()
+    if !env_types.is_empty() {
+        let visible_height = chunks[1].height as usize;
+        let (start, end) = calculate_visible_range(
+            total_items,
+            selected,
+            &mut state.dialog_scroll,
+            visible_height,
+        );
+
+        let items: Vec<ListItem> = env_types
             .iter()
             .enumerate()
+            .skip(start)
+            .take(end - start)
             .map(|(i, env_type)| {
                 let style = if i == selected {
                     style_selected()
@@ -196,9 +218,16 @@ fn render_bulk_switch(frame: &mut Frame, area: Rect, state: &AppState, selected:
     frame.render_widget(hint, chunks[2]);
 }
 
-fn render_select_env(frame: &mut Frame, area: Rect, key: &str, selected: usize, current_index: Option<usize>, options: &[EnvOption]) {
+fn render_select_env(frame: &mut Frame, area: Rect, key: &str, selected: usize, current_index: Option<usize>, options: &[EnvOption], state: &mut AppState) {
+    let total_items = options.len();
+    let scroll_info = scroll_status(
+        state.dialog_scroll,
+        area.height.saturating_sub(8) as usize,
+        total_items,
+    );
+
     let block = Block::default()
-        .title(Span::styled(format!(" Select value for: {} ", key), style_title()))
+        .title(Span::styled(format!(" Select value for: {}{} ", key, scroll_info), style_title()))
         .borders(Borders::ALL)
         .border_style(style_border_focused());
 
@@ -215,9 +244,19 @@ fn render_select_env(frame: &mut Frame, area: Rect, key: &str, selected: usize, 
     let info = Paragraph::new("Choose which environment's value to use:").style(style_muted());
     frame.render_widget(info, chunks[0]);
 
+    let visible_height = chunks[1].height as usize;
+    let (start, end) = calculate_visible_range(
+        total_items,
+        selected,
+        &mut state.dialog_scroll,
+        visible_height,
+    );
+
     let items: Vec<ListItem> = options
         .iter()
         .enumerate()
+        .skip(start)
+        .take(end - start)
         .map(|(i, opt)| {
             let is_selected = i == selected;
             let is_current = current_index == Some(i);
@@ -259,9 +298,16 @@ fn render_select_env(frame: &mut Frame, area: Rect, key: &str, selected: usize, 
     frame.render_widget(hint, chunks[2]);
 }
 
-fn render_select_section_env(frame: &mut Frame, area: Rect, section: &str, selected: usize, current_indices: &[usize], options: &[EnvOption]) {
+fn render_select_section_env(frame: &mut Frame, area: Rect, section: &str, selected: usize, current_indices: &[usize], options: &[EnvOption], state: &mut AppState) {
+    let total_items = options.len();
+    let scroll_info = scroll_status(
+        state.dialog_scroll,
+        area.height.saturating_sub(8) as usize,
+        total_items,
+    );
+
     let block = Block::default()
-        .title(Span::styled(format!(" Switch section: [{}] ", section), style_title()))
+        .title(Span::styled(format!(" Switch section: [{}]{} ", section, scroll_info), style_title()))
         .borders(Borders::ALL)
         .border_style(style_border_focused());
 
@@ -278,9 +324,19 @@ fn render_select_section_env(frame: &mut Frame, area: Rect, section: &str, selec
     let info = Paragraph::new("Select environment to switch all keys in this section:").style(style_muted());
     frame.render_widget(info, chunks[0]);
 
+    let visible_height = chunks[1].height as usize;
+    let (start, end) = calculate_visible_range(
+        total_items,
+        selected,
+        &mut state.dialog_scroll,
+        visible_height,
+    );
+
     let items: Vec<ListItem> = options
         .iter()
         .enumerate()
+        .skip(start)
+        .take(end - start)
         .map(|(i, opt)| {
             let is_selected = i == selected;
             let is_current = current_indices.contains(&i);

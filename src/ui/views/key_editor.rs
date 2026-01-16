@@ -9,7 +9,7 @@ use crate::app::{AppState, InputMode};
 use crate::models::EnvironmentType;
 use crate::ui::styles::*;
 
-pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
+pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
     let Some(project) = state.current_project() else {
         return;
     };

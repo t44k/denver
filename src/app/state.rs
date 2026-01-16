@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use crate::models::{EnvironmentType, Project};
@@ -17,6 +18,11 @@ pub struct AppState {
     pub should_quit: bool,
     pub show_help: bool,
     pub editing_key: Option<String>, // Key currently being edited in KeyEditor
+    // Scroll offsets for pagination
+    pub project_list_scroll: usize,
+    pub config_scroll: usize,
+    pub missing_section_scrolls: HashMap<EnvironmentType, usize>,
+    pub dialog_scroll: usize,
 }
 
 /// Which section of the project detail view is selected
@@ -43,7 +49,36 @@ impl AppState {
             should_quit: false,
             show_help: false,
             editing_key: None,
+            project_list_scroll: 0,
+            config_scroll: 0,
+            missing_section_scrolls: HashMap::new(),
+            dialog_scroll: 0,
         }
+    }
+
+    /// Ensure the selected item is visible in the scrollable area
+    pub fn ensure_visible(&mut self, selected: usize, scroll: &mut usize, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        // If selection is above the visible area, scroll up
+        if selected < *scroll {
+            *scroll = selected;
+        }
+        // If selection is below the visible area, scroll down
+        else if selected >= *scroll + visible_height {
+            *scroll = selected - visible_height + 1;
+        }
+    }
+
+    /// Get the scroll offset for a missing section
+    pub fn get_missing_scroll(&self, env_type: &EnvironmentType) -> usize {
+        self.missing_section_scrolls.get(env_type).copied().unwrap_or(0)
+    }
+
+    /// Set the scroll offset for a missing section
+    pub fn set_missing_scroll(&mut self, env_type: &EnvironmentType, scroll: usize) {
+        self.missing_section_scrolls.insert(env_type.clone(), scroll);
     }
 
     pub fn current_project(&self) -> Option<&Project> {
@@ -118,6 +153,10 @@ impl AppState {
             if pos + 1 < sections.len() {
                 self.selected_section = sections[pos + 1].clone();
                 self.selected_key_index = 0;
+                // Reset scroll for the new section
+                if let Section::MissingFrom(ref env) = self.selected_section {
+                    self.missing_section_scrolls.insert(env.clone(), 0);
+                }
             }
         }
     }
@@ -129,6 +168,12 @@ impl AppState {
             if pos > 0 {
                 self.selected_section = sections[pos - 1].clone();
                 self.selected_key_index = 0;
+                // Reset scroll for the new section
+                if self.selected_section == Section::CurrentConfig {
+                    self.config_scroll = 0;
+                } else if let Section::MissingFrom(ref env) = self.selected_section {
+                    self.missing_section_scrolls.insert(env.clone(), 0);
+                }
             }
         }
     }
@@ -157,6 +202,8 @@ impl AppState {
     pub fn reset_detail_selection(&mut self) {
         self.selected_section = Section::CurrentConfig;
         self.selected_key_index = 0;
+        self.config_scroll = 0;
+        self.missing_section_scrolls.clear();
     }
 
     /// Get the section name for the currently selected key (if any)

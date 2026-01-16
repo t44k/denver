@@ -1,4 +1,5 @@
 mod components;
+pub mod pagination;
 mod styles;
 mod views;
 
@@ -9,7 +10,7 @@ use crate::app::AppState;
 pub use styles::*;
 
 /// Main render function
-pub fn render(frame: &mut Frame, state: &AppState) {
+pub fn render(frame: &mut Frame, state: &mut AppState) {
     use ratatui::layout::{Constraint, Layout};
 
     let chunks = Layout::vertical([
@@ -39,8 +40,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     components::footer::render(frame, chunks[2], state);
 
     // Render dialog if present
-    if let Some(ref dialog) = state.dialog {
-        components::dialog::render(frame, dialog, state);
+    if let Some(ref dialog) = state.dialog.clone() {
+        components::dialog::render(frame, &dialog, state);
     }
 
     // Render help overlay if showing

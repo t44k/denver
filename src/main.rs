@@ -65,6 +65,7 @@ fn run_app(
     loop {
         // Render
         terminal.draw(|frame| ui::render(frame, state))?;
+        // Note: render may have updated scroll offsets for pagination
 
         // Handle events with timeout for tick
         if event::poll(Duration::from_millis(100))? {
