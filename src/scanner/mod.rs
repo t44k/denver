@@ -1,4 +1,5 @@
 mod parser;
+mod k8s;
 
 pub use parser::parse_env_file;
 
@@ -102,7 +103,22 @@ fn scan_project_with_name(path: &Path, project_name: String) -> DenverResult<Opt
         }
     }
 
-    // Only return project if it has at least one .env file
+    // Scan for .k8s directory
+    let k8s_dir = path.join(".k8s");
+    if k8s_dir.is_dir() {
+        match k8s::scan_k8s_directory(&k8s_dir) {
+            Ok(k8s_envs) => {
+                for env in k8s_envs {
+                    project.add_environment(env);
+                }
+            }
+            Err(e) => {
+                eprintln!("Warning: Could not scan K8s directory {}: {}", k8s_dir.display(), e);
+            }
+        }
+    }
+
+    // Only return project if it has at least one environment
     if project.environments.is_empty() {
         Ok(None)
     } else {

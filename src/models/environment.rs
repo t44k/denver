@@ -10,6 +10,11 @@ pub enum EnvironmentType {
     Default,
     /// Any .env.* file (e.g., .env.dev, .env.staging, .env.live)
     Named(String),
+    /// Kubernetes manifest environment variables
+    Kubernetes {
+        resource_name: String,
+        container_name: Option<String>,
+    },
 }
 
 impl EnvironmentType {
@@ -23,10 +28,16 @@ impl EnvironmentType {
         }
     }
 
-    pub fn display_name(&self) -> &str {
+    pub fn display_name(&self) -> String {
         match self {
-            Self::Default => ".env",
-            Self::Named(name) => name,
+            Self::Default => ".env".to_string(),
+            Self::Named(name) => name.clone(),
+            Self::Kubernetes { resource_name, container_name } => {
+                match container_name {
+                    Some(container) => format!("k8s.{}.{}", resource_name, container),
+                    None => format!("k8s.{}", resource_name),
+                }
+            }
         }
     }
 
@@ -34,15 +45,29 @@ impl EnvironmentType {
         match self {
             Self::Default => ".env".to_string(),
             Self::Named(name) => format!(".env.{}", name),
+            Self::Kubernetes { resource_name, container_name } => {
+                match container_name {
+                    Some(container) => format!("k8s.{}.{}", resource_name, container),
+                    None => format!("k8s.{}", resource_name),
+                }
+            }
         }
     }
 
-    /// Returns sort order priority (Default first, then alphabetical)
-    pub fn sort_key(&self) -> (u8, &str) {
+    /// Returns sort order priority (Default first, then Named alphabetical, then K8s)
+    pub fn sort_key(&self) -> (u8, String, String) {
         match self {
-            Self::Default => (0, ""),
-            Self::Named(name) => (1, name),
+            Self::Default => (0, String::new(), String::new()),
+            Self::Named(name) => (1, name.clone(), String::new()),
+            Self::Kubernetes { resource_name, container_name } => {
+                (2, resource_name.clone(), container_name.clone().unwrap_or_default())
+            }
         }
+    }
+
+    /// Check if this is a Kubernetes environment type
+    pub fn is_kubernetes(&self) -> bool {
+        matches!(self, Self::Kubernetes { .. })
     }
 }
 
@@ -61,16 +86,20 @@ pub struct Environment {
     /// Stores earlier occurrences of keys that were overwritten by duplicates
     pub duplicated_vars: Vec<EnvVar>,
     pub is_dirty: bool,
+    /// K8s environments are read-only
+    pub is_readonly: bool,
 }
 
 impl Environment {
     pub fn new(env_type: EnvironmentType, path: PathBuf) -> Self {
+        let is_readonly = env_type.is_kubernetes();
         Self {
             env_type,
             path,
             variables: BTreeMap::new(),
             duplicated_vars: Vec::new(),
             is_dirty: false,
+            is_readonly,
         }
     }
 

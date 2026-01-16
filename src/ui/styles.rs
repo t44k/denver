@@ -109,3 +109,16 @@ pub fn style_target_selected() -> Style {
         .fg(Color::Rgb(150, 255, 150))
         .add_modifier(Modifier::BOLD)
 }
+
+// K8s environment styling
+pub const K8S_COLOR: Color = Color::Rgb(100, 149, 237); // Cornflower blue
+
+pub fn style_k8s() -> Style {
+    Style::default().fg(K8S_COLOR)
+}
+
+pub fn style_readonly() -> Style {
+    Style::default()
+        .fg(MUTED)
+        .add_modifier(Modifier::ITALIC)
+}

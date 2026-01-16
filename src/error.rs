@@ -42,6 +42,12 @@ pub enum DenverError {
 
     #[error("Terminal error: {0}")]
     Terminal(#[from] std::io::Error),
+
+    #[error("Failed to parse K8s YAML '{path}': {message}")]
+    K8sParseError { path: PathBuf, message: String },
+
+    #[error("Cannot modify read-only environment")]
+    ReadOnlyEnvironment,
 }
 
 /// Result type alias for Denver operations

@@ -148,9 +148,10 @@ fn render_add_key(frame: &mut Frame, area: Rect, key: &str, value: &str, focus_o
 }
 
 fn render_bulk_switch(frame: &mut Frame, area: Rect, state: &mut AppState, selected: usize) {
+    // Use named_env_types to exclude Default (can't copy .env to itself)
     let env_types: Vec<_> = state
         .current_project()
-        .map(|p| p.sorted_env_types().into_iter().cloned().collect())
+        .map(|p| p.named_env_types().into_iter().cloned().collect())
         .unwrap_or_default();
     let total_items = env_types.len();
 

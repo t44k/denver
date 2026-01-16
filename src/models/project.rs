@@ -65,11 +65,22 @@ impl Project {
     }
 
     /// Bulk switch: replace entire .env with values from another environment
+    /// Creates .env if it doesn't exist (useful for copying from K8s configs)
     pub fn bulk_switch(&mut self, from_env: &EnvironmentType) {
         if let Some(source) = self.environments.get(from_env).cloned() {
+            // Create Default environment if it doesn't exist
+            if !self.environments.contains_key(&EnvironmentType::Default) {
+                let env_path = self.path.join(".env");
+                let new_env = Environment::new(EnvironmentType::Default, env_path);
+                self.environments.insert(EnvironmentType::Default, new_env);
+            }
+
             if let Some(default) = self.environments.get_mut(&EnvironmentType::Default) {
                 default.variables.clear();
-                for (key, var) in source.variables {
+                for (key, mut var) in source.variables {
+                    // Reset line numbers for newly copied vars
+                    var.line_number = None;
+                    var.section = None;
                     default.variables.insert(key, var);
                 }
                 default.is_dirty = true;
@@ -1509,5 +1520,42 @@ mod tests {
         let host_pos = db_keys.iter().position(|k| k == "DB_HOST").unwrap();
         let port_pos = db_keys.iter().position(|k| k == "DB_PORT").unwrap();
         assert!(host_pos < port_pos, "Key order within section should be preserved");
+    }
+
+    #[test]
+    fn test_bulk_switch_creates_env_from_k8s() {
+        // Create a project with only a K8s environment (no .env)
+        let mut project = Project::new("test".to_string(), PathBuf::from("/tmp/test"));
+
+        let k8s_env_type = EnvironmentType::Kubernetes {
+            resource_name: "my-app".to_string(),
+            container_name: None,
+        };
+        let mut k8s_env = Environment::new(k8s_env_type.clone(), PathBuf::from("/tmp/test/.k8s/deployment.yaml"));
+
+        let var1 = EnvVar::new("SECRET".to_string(), "abc123".to_string());
+        let var2 = EnvVar::new("PORT".to_string(), "8080".to_string());
+        k8s_env.variables.insert("SECRET".to_string(), var1);
+        k8s_env.variables.insert("PORT".to_string(), var2);
+
+        project.add_environment(k8s_env);
+
+        // Verify no Default environment exists
+        assert!(!project.environments.contains_key(&EnvironmentType::Default));
+
+        // Bulk switch from K8s to Default - should create Default
+        project.bulk_switch(&k8s_env_type);
+
+        // Verify Default environment was created
+        assert!(project.environments.contains_key(&EnvironmentType::Default));
+
+        // Verify values were copied
+        let default_env = project.environments.get(&EnvironmentType::Default).unwrap();
+        assert_eq!(default_env.get_value("SECRET"), Some("abc123"));
+        assert_eq!(default_env.get_value("PORT"), Some("8080"));
+        assert!(default_env.is_dirty);
+
+        // Verify the path is correct
+        assert_eq!(default_env.path, PathBuf::from("/tmp/test/.env"));
     }
 }
