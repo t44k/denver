@@ -19,11 +19,11 @@ pub fn render(frame: &mut Frame, dialog: &Dialog, state: &mut AppState) {
         Dialog::Confirm { title, message, .. } => {
             render_confirm(frame, area, title, message);
         }
-        Dialog::Input { title, prompt, value, .. } => {
-            render_input(frame, area, title, prompt, value);
+        Dialog::Input { title, prompt, value, cursor_pos, .. } => {
+            render_input(frame, area, title, prompt, value, *cursor_pos);
         }
-        Dialog::AddKey { key, value, focus_on_value } => {
-            render_add_key(frame, area, key, value, *focus_on_value);
+        Dialog::AddKey { key, value, focus_on_value, key_cursor_pos, value_cursor_pos } => {
+            render_add_key(frame, area, key, value, *focus_on_value, *key_cursor_pos, *value_cursor_pos);
         }
         Dialog::BulkSwitch { selected_env_index } => {
             render_bulk_switch(frame, area, state, *selected_env_index);
@@ -67,7 +67,7 @@ fn render_confirm(frame: &mut Frame, area: Rect, title: &str, message: &str) {
     frame.render_widget(buttons, chunks[1]);
 }
 
-fn render_input(frame: &mut Frame, area: Rect, title: &str, prompt: &str, value: &str) {
+fn render_input(frame: &mut Frame, area: Rect, title: &str, prompt: &str, value: &str, cursor_pos: usize) {
     let block = Block::default()
         .title(Span::styled(format!(" {} ", title), style_title()))
         .borders(Borders::ALL)
@@ -86,13 +86,18 @@ fn render_input(frame: &mut Frame, area: Rect, title: &str, prompt: &str, value:
     let prompt_widget = Paragraph::new(prompt).style(style_muted());
     frame.render_widget(prompt_widget, chunks[0]);
 
-    let input = Paragraph::new(format!("{}_", value))
+    // Insert cursor at correct position
+    let before = &value[..cursor_pos];
+    let after = &value[cursor_pos..];
+    let display_value = format!("{}|{}", before, after);
+
+    let input = Paragraph::new(display_value)
         .style(style_input_active())
         .block(Block::default().borders(Borders::ALL).border_style(style_border()));
     frame.render_widget(input, chunks[1]);
 }
 
-fn render_add_key(frame: &mut Frame, area: Rect, key: &str, value: &str, focus_on_value: bool) {
+fn render_add_key(frame: &mut Frame, area: Rect, key: &str, value: &str, focus_on_value: bool, key_cursor_pos: usize, value_cursor_pos: usize) {
     let block = Block::default()
         .title(Span::styled(" Add New Key ", style_title()))
         .borders(Borders::ALL)
@@ -115,10 +120,17 @@ fn render_add_key(frame: &mut Frame, area: Rect, key: &str, value: &str, focus_o
     let key_label = Paragraph::new("Key:").style(style_muted());
     frame.render_widget(key_label, chunks[0]);
 
-    // Key input
+    // Key input with cursor at correct position
     let key_style = if !focus_on_value { style_input_active() } else { style_input() };
     let key_border = if !focus_on_value { style_border_focused() } else { style_border() };
-    let key_input = Paragraph::new(if !focus_on_value { format!("{}_", key) } else { key.to_string() })
+    let key_display = if !focus_on_value {
+        let before = &key[..key_cursor_pos];
+        let after = &key[key_cursor_pos..];
+        format!("{}|{}", before, after)
+    } else {
+        key.to_string()
+    };
+    let key_input = Paragraph::new(key_display)
         .style(key_style)
         .block(Block::default().borders(Borders::ALL).border_style(key_border));
     frame.render_widget(key_input, chunks[1]);
@@ -127,10 +139,17 @@ fn render_add_key(frame: &mut Frame, area: Rect, key: &str, value: &str, focus_o
     let value_label = Paragraph::new("Value:").style(style_muted());
     frame.render_widget(value_label, chunks[2]);
 
-    // Value input
+    // Value input with cursor at correct position
     let value_style = if focus_on_value { style_input_active() } else { style_input() };
     let value_border = if focus_on_value { style_border_focused() } else { style_border() };
-    let value_input = Paragraph::new(if focus_on_value { format!("{}_", value) } else { value.to_string() })
+    let value_display = if focus_on_value {
+        let before = &value[..value_cursor_pos];
+        let after = &value[value_cursor_pos..];
+        format!("{}|{}", before, after)
+    } else {
+        value.to_string()
+    };
+    let value_input = Paragraph::new(value_display)
         .style(value_style)
         .block(Block::default().borders(Borders::ALL).border_style(value_border));
     frame.render_widget(value_input, chunks[3]);

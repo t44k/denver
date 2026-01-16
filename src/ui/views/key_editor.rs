@@ -69,6 +69,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
         is_target_selected,
         state.input_mode == InputMode::Editing && is_target_selected,
         &state.input_buffer,
+        state.cursor_pos,
         true, // is_target
         is_inactive,
     );
@@ -87,6 +88,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut AppState) {
             is_selected,
             state.input_mode == InputMode::Editing && is_selected,
             &state.input_buffer,
+            state.cursor_pos,
             false, // not target
             false, // not inactive (for named envs)
         );
@@ -101,6 +103,7 @@ fn render_env_slot(
     is_selected: bool,
     is_editing: bool,
     input_buffer: &str,
+    cursor_pos: usize,
     is_target: bool,
     is_inactive: bool,
 ) {
@@ -142,7 +145,10 @@ fn render_env_slot(
     };
 
     let display_value = if is_editing {
-        format!("{}_", input_buffer)
+        // Insert cursor character at the correct position
+        let before = &input_buffer[..cursor_pos];
+        let after = &input_buffer[cursor_pos..];
+        format!("{}|{}", before, after)
     } else {
         value.to_string()
     };

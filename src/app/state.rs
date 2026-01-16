@@ -13,6 +13,7 @@ pub struct AppState {
     pub current_view: View,
     pub input_mode: InputMode,
     pub input_buffer: String,
+    pub cursor_pos: usize, // Cursor position within input_buffer
     pub message: Option<Message>,
     pub dialog: Option<Dialog>,
     pub should_quit: bool,
@@ -45,6 +46,7 @@ impl AppState {
             current_view: View::ProjectList,
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
+            cursor_pos: 0,
             message: None,
             dialog: None,
             should_quit: false,
@@ -229,12 +231,15 @@ pub enum Dialog {
         title: String,
         prompt: String,
         value: String,
+        cursor_pos: usize,
         on_submit: DialogAction,
     },
     AddKey {
         key: String,
         value: String,
         focus_on_value: bool,
+        key_cursor_pos: usize,
+        value_cursor_pos: usize,
     },
     BulkSwitch {
         selected_env_index: usize,

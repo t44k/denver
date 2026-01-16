@@ -193,6 +193,7 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                 // Get current value for the selected env slot
                 if let Some(ref key) = state.editing_key.clone() {
                     let value = get_editor_slot_value(state, key);
+                    state.cursor_pos = value.len(); // Start cursor at end
                     state.input_buffer = value;
                     state.input_mode = InputMode::Editing;
                 }
@@ -206,6 +207,7 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                     let value = state.input_buffer.clone();
                     state.input_mode = InputMode::Normal;
                     state.input_buffer.clear();
+                    state.cursor_pos = 0;
 
                     // Determine which slot was being edited
                     // Slot layout: 0 = target (.env), 1..n = named envs
@@ -230,6 +232,7 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
         Action::CancelEdit => {
             state.input_mode = InputMode::Normal;
             state.input_buffer.clear();
+            state.cursor_pos = 0;
             None
         }
 
@@ -253,30 +256,145 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
 
         Action::InputChar(c) => {
             if state.input_mode == InputMode::Editing {
-                state.input_buffer.push(c);
-            } else if let Some(Dialog::AddKey { ref mut key, ref mut value, focus_on_value }) = state.dialog {
+                state.input_buffer.insert(state.cursor_pos, c);
+                state.cursor_pos += 1;
+            } else if let Some(Dialog::AddKey { ref mut key, ref mut value, focus_on_value, ref mut key_cursor_pos, ref mut value_cursor_pos }) = state.dialog {
                 if focus_on_value {
-                    value.push(c);
+                    value.insert(*value_cursor_pos, c);
+                    *value_cursor_pos += 1;
                 } else {
-                    key.push(c);
+                    key.insert(*key_cursor_pos, c);
+                    *key_cursor_pos += 1;
                 }
-            } else if let Some(Dialog::Input { ref mut value, .. }) = state.dialog {
-                value.push(c);
+            } else if let Some(Dialog::Input { ref mut value, ref mut cursor_pos, .. }) = state.dialog {
+                value.insert(*cursor_pos, c);
+                *cursor_pos += 1;
             }
             None
         }
 
         Action::InputBackspace => {
             if state.input_mode == InputMode::Editing {
-                state.input_buffer.pop();
-            } else if let Some(Dialog::AddKey { ref mut key, ref mut value, focus_on_value }) = state.dialog {
-                if focus_on_value {
-                    value.pop();
-                } else {
-                    key.pop();
+                if state.cursor_pos > 0 {
+                    state.input_buffer.remove(state.cursor_pos - 1);
+                    state.cursor_pos -= 1;
                 }
-            } else if let Some(Dialog::Input { ref mut value, .. }) = state.dialog {
-                value.pop();
+            } else if let Some(Dialog::AddKey { ref mut key, ref mut value, focus_on_value, ref mut key_cursor_pos, ref mut value_cursor_pos }) = state.dialog {
+                if focus_on_value {
+                    if *value_cursor_pos > 0 {
+                        value.remove(*value_cursor_pos - 1);
+                        *value_cursor_pos -= 1;
+                    }
+                } else {
+                    if *key_cursor_pos > 0 {
+                        key.remove(*key_cursor_pos - 1);
+                        *key_cursor_pos -= 1;
+                    }
+                }
+            } else if let Some(Dialog::Input { ref mut value, ref mut cursor_pos, .. }) = state.dialog {
+                if *cursor_pos > 0 {
+                    value.remove(*cursor_pos - 1);
+                    *cursor_pos -= 1;
+                }
+            }
+            None
+        }
+
+        Action::InputDelete => {
+            if state.input_mode == InputMode::Editing {
+                if state.cursor_pos < state.input_buffer.len() {
+                    state.input_buffer.remove(state.cursor_pos);
+                }
+            } else if let Some(Dialog::AddKey { ref mut key, ref mut value, focus_on_value, key_cursor_pos, value_cursor_pos }) = state.dialog {
+                if focus_on_value {
+                    if value_cursor_pos < value.len() {
+                        value.remove(value_cursor_pos);
+                    }
+                } else {
+                    if key_cursor_pos < key.len() {
+                        key.remove(key_cursor_pos);
+                    }
+                }
+            } else if let Some(Dialog::Input { ref mut value, cursor_pos, .. }) = state.dialog {
+                if cursor_pos < value.len() {
+                    value.remove(cursor_pos);
+                }
+            }
+            None
+        }
+
+        Action::InputLeft => {
+            if state.input_mode == InputMode::Editing {
+                if state.cursor_pos > 0 {
+                    state.cursor_pos -= 1;
+                }
+            } else if let Some(Dialog::AddKey { focus_on_value, ref mut key_cursor_pos, ref mut value_cursor_pos, .. }) = state.dialog {
+                if focus_on_value {
+                    if *value_cursor_pos > 0 {
+                        *value_cursor_pos -= 1;
+                    }
+                } else {
+                    if *key_cursor_pos > 0 {
+                        *key_cursor_pos -= 1;
+                    }
+                }
+            } else if let Some(Dialog::Input { ref mut cursor_pos, .. }) = state.dialog {
+                if *cursor_pos > 0 {
+                    *cursor_pos -= 1;
+                }
+            }
+            None
+        }
+
+        Action::InputRight => {
+            if state.input_mode == InputMode::Editing {
+                if state.cursor_pos < state.input_buffer.len() {
+                    state.cursor_pos += 1;
+                }
+            } else if let Some(Dialog::AddKey { ref key, ref value, focus_on_value, ref mut key_cursor_pos, ref mut value_cursor_pos }) = state.dialog {
+                if focus_on_value {
+                    if *value_cursor_pos < value.len() {
+                        *value_cursor_pos += 1;
+                    }
+                } else {
+                    if *key_cursor_pos < key.len() {
+                        *key_cursor_pos += 1;
+                    }
+                }
+            } else if let Some(Dialog::Input { ref value, ref mut cursor_pos, .. }) = state.dialog {
+                if *cursor_pos < value.len() {
+                    *cursor_pos += 1;
+                }
+            }
+            None
+        }
+
+        Action::InputHome => {
+            if state.input_mode == InputMode::Editing {
+                state.cursor_pos = 0;
+            } else if let Some(Dialog::AddKey { focus_on_value, ref mut key_cursor_pos, ref mut value_cursor_pos, .. }) = state.dialog {
+                if focus_on_value {
+                    *value_cursor_pos = 0;
+                } else {
+                    *key_cursor_pos = 0;
+                }
+            } else if let Some(Dialog::Input { ref mut cursor_pos, .. }) = state.dialog {
+                *cursor_pos = 0;
+            }
+            None
+        }
+
+        Action::InputEnd => {
+            if state.input_mode == InputMode::Editing {
+                state.cursor_pos = state.input_buffer.len();
+            } else if let Some(Dialog::AddKey { ref key, ref value, focus_on_value, ref mut key_cursor_pos, ref mut value_cursor_pos }) = state.dialog {
+                if focus_on_value {
+                    *value_cursor_pos = value.len();
+                } else {
+                    *key_cursor_pos = key.len();
+                }
+            } else if let Some(Dialog::Input { ref value, ref mut cursor_pos, .. }) = state.dialog {
+                *cursor_pos = value.len();
             }
             None
         }
@@ -287,6 +405,8 @@ pub fn update(state: &mut AppState, action: Action) -> Option<Action> {
                     key: String::new(),
                     value: String::new(),
                     focus_on_value: false,
+                    key_cursor_pos: 0,
+                    value_cursor_pos: 0,
                 });
             }
             None
